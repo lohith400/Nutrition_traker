@@ -1,19 +1,10 @@
 # NutriSync frontend
 
-This is the first premium dashboard implementation for the app. It is designed as a clean, deployable UI that fits a serious nutrition product.
-
-## Quick start
-
 ```bash
 cd frontend
 npm install
+cp .env.example .env.local
 npm run dev
 ```
 
-Open http://localhost:3000
-
-## Notes
-
-- This is a polished UI foundation inspired by minimal editorial wellness products.
-- The current version uses representative data for dashboard display.
-- The next step is to connect the frontend to a FastAPI backend and the existing Python logic in the repo.
+The dashboard reads profile, budget, meals, food logging, onboarding, and coach responses from `NEXT_PUBLIC_API_URL`. Start the FastAPI service first for live data.
