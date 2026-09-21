@@ -1,20 +1,16 @@
-"""NutriSync HTTP API.
-
-This adapter keeps the existing deterministic nutrition modules as the source of
-truth and exposes them to the Next.js client. Run from this directory with:
-    uvicorn app:app --reload --port 8000
-"""
+"""NutriSync HTTP API."""
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / "backend" / ".env")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -24,8 +20,8 @@ import menu_planner  # noqa: E402
 import orchestrator  # noqa: E402
 import rag_resolver  # noqa: E402
 
-app = FastAPI(title="NutriSync API", version="0.2.0")
-origins = [item.strip() for item in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if item.strip()]
+app = FastAPI(title="NutriSync API", version="0.3.0")
+origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if x.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 class OnboardingRequest(BaseModel):
@@ -59,18 +55,16 @@ def get_profile():
 
 @app.post("/api/profile/onboarding")
 def save_onboarding(payload: OnboardingRequest):
-    bmr, tdee = math_engine.calculate_bmr_tdee(payload.age, payload.sex, payload.height_cm, payload.current_weight_kg, payload.activity_level)
-    targets = math_engine.calculate_targets(tdee, payload.goal, payload.current_weight_kg)
-    profile = {**payload.model_dump(), "bmr_kcal": bmr, "tdee_kcal": tdee, "onboarded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **targets}
+    data = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+    bmr, tdee = math_engine.calculate_bmr_tdee(data["age"], data["sex"], data["height_cm"], data["current_weight_kg"], data["activity_level"])
+    targets = math_engine.calculate_targets(tdee, data["goal"], data["current_weight_kg"])
+    profile = {**data, "bmr_kcal": bmr, "tdee_kcal": tdee, "onboarded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **targets}
     memory_agent.save_user_profile(profile)
     return {"status": "onboarded", **profile}
 
 @app.get("/api/overview")
 def get_overview():
-    budget = math_engine.get_remaining_budget_today(datetime.now().strftime("%Y-%m-%d"))
-    if "error" in budget:
-        return budget
-    return budget
+    return math_engine.get_remaining_budget_today(datetime.now().strftime("%Y-%m-%d"))
 
 @app.get("/api/recent-meals")
 def get_recent_meals():
@@ -101,6 +95,9 @@ def get_patterns():
 
 @app.post("/api/chat")
 def chat(payload: ChatRequest):
-    if getattr(orchestrator, "client", None) is None:
-        raise HTTPException(status_code=503, detail="AI coach is not configured. Set OPENROUTER_API_KEY in the backend environment.")
-    return {"reply": orchestrator.interact(payload.message)}
+    if orchestrator.client is None:
+        raise HTTPException(status_code=503, detail="AI coach is not configured. Create backend/.env and set OPENROUTER_API_KEY.")
+    try:
+        return {"reply": orchestrator.interact(payload.message)}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Coach provider error: {exc}") from exc

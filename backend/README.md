@@ -1,15 +1,26 @@
-# NutriSync API
+# NutriSync local setup
 
-```bash
+## Backend (PowerShell)
+
+```powershell
 cd backend
-python -m venv .venv
-source .venv/bin/activate
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp .env.example .env
-# export variables from .env with your preferred dotenv loader or shell
-uvicorn app:app --reload --host 0.0.0.0 --port 8000
+Copy-Item .env.example .env
+# Edit .env and set OPENROUTER_API_KEY if you want coach chat.
+python -m uvicorn app:app --reload --host 127.0.0.1 --port 8000
 ```
 
-The API imports the repository's existing `math_engine`, `memory_agent`, `rag_resolver`, and `menu_planner` modules. It therefore reads and writes the repository SQLite database instead of returning demo values.
+Check `http://127.0.0.1:8000/health` before starting the frontend.
 
-Never commit a real OpenRouter key. The key previously present in the CLI orchestrator must be revoked and replaced with an environment variable.
+## Frontend (PowerShell)
+
+```powershell
+cd frontend
+Copy-Item .env.example .env.local
+npm install
+npm run dev
+```
+
+The frontend uses `NEXT_PUBLIC_API_URL=http://localhost:8000`. If you use `127.0.0.1` for the API, change the frontend `.env.local` value accordingly and restart Next.js.

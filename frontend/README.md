@@ -1,10 +1,10 @@
 # NutriSync frontend
 
-```bash
+```powershell
 cd frontend
+Copy-Item .env.example .env.local
 npm install
-cp .env.example .env.local
 npm run dev
 ```
 
-The dashboard reads profile, budget, meals, food logging, onboarding, and coach responses from `NEXT_PUBLIC_API_URL`. Start the FastAPI service first for live data.
+The frontend calls the FastAPI backend through `NEXT_PUBLIC_API_URL`. Restart the Next.js dev server after changing `.env.local`; environment variables are read when Next.js starts.
