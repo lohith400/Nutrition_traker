@@ -94,6 +94,43 @@ def get_todays_logs() -> dict:
     return {"date": today, "meals": [dict(r) for r in rows]}
 
 
+def get_logs_history(days: int = 14) -> list:
+    """Every logged meal for the last `days` days, grouped by date (most
+    recent first), each with that day's totals. This is the full daily
+    intake record -- daily_logs already stores one row per meal per day
+    forever; this just makes it queryable/browsable instead of only ever
+    looking at "today"."""
+    since = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT log_date, log_time, meal_type, food_name, quantity, calories, protein_g, carbs_g, fat_g "
+        "FROM daily_logs WHERE log_date >= ? ORDER BY log_date DESC, log_time ASC",
+        (since,),
+    ).fetchall()
+    conn.close()
+
+    by_date: dict = {}
+    for r in rows:
+        d = r["log_date"]
+        entry = by_date.setdefault(d, {
+            "date": d, "meals": [],
+            "total_calories": 0.0, "total_protein_g": 0.0, "total_carbs_g": 0.0, "total_fat_g": 0.0,
+        })
+        entry["meals"].append(dict(r))
+        entry["total_calories"] += r["calories"] or 0
+        entry["total_protein_g"] += r["protein_g"] or 0
+        entry["total_carbs_g"] += r["carbs_g"] or 0
+        entry["total_fat_g"] += r["fat_g"] or 0
+
+    ordered = sorted(by_date.values(), key=lambda x: x["date"], reverse=True)
+    for entry in ordered:
+        entry["total_calories"] = round(entry["total_calories"], 1)
+        entry["total_protein_g"] = round(entry["total_protein_g"], 1)
+        entry["total_carbs_g"] = round(entry["total_carbs_g"], 1)
+        entry["total_fat_g"] = round(entry["total_fat_g"], 1)
+    return ordered
+
+
 # ---------- Water tracking ----------
 
 def _ensure_water_table(conn) -> None:
@@ -183,3 +220,61 @@ def get_active_patterns() -> dict:
     ).fetchall()
     conn.close()
     return {"patterns": [dict(r) for r in rows]}
+
+
+# ---------- Coach chat history ----------
+# The conversational coach (see orchestrator.chat_with_tools) needs its
+# transcript to survive page refreshes and server restarts, so it lives in
+# the same SQLite database as everything else rather than in memory.
+
+def _ensure_chat_table(conn) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS chat_messages (
+               msg_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+               role       TEXT NOT NULL,
+               content    TEXT NOT NULL,
+               tool_events TEXT,
+               created_at TEXT NOT NULL
+           )"""
+    )
+
+
+def save_chat_message(role: str, content: str, tool_events=None) -> dict:
+    import json as _json
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = _get_conn()
+    _ensure_chat_table(conn)
+    conn.execute(
+        "INSERT INTO chat_messages (role, content, tool_events, created_at) VALUES (?, ?, ?, ?)",
+        (role, content, _json.dumps(tool_events) if tool_events else None, now),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "saved"}
+
+
+def get_chat_history(limit: int = 200) -> list:
+    import json as _json
+    conn = _get_conn()
+    _ensure_chat_table(conn)
+    rows = conn.execute(
+        "SELECT role, content, tool_events, created_at FROM chat_messages "
+        "ORDER BY msg_id ASC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        item = dict(r)
+        item["tool_events"] = _json.loads(item["tool_events"]) if item.get("tool_events") else []
+        out.append(item)
+    return out
+
+
+def clear_chat_history() -> dict:
+    conn = _get_conn()
+    _ensure_chat_table(conn)
+    conn.execute("DELETE FROM chat_messages")
+    conn.commit()
+    conn.close()
+    return {"status": "cleared"}

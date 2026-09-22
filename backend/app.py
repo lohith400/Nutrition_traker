@@ -65,6 +65,8 @@ def save_onboarding(payload: OnboardingRequest):
     memory_agent.save_user_profile(profile)
     return {"status": "onboarded", **profile}
 
+
+
 @app.get("/api/overview")
 def get_overview():
     budget = math_engine.get_remaining_budget_today(datetime.now().strftime("%Y-%m-%d"))
@@ -73,6 +75,12 @@ def get_overview():
     water = memory_agent.get_todays_water()
     budget["consumed_water_l"] = water["consumed_water_l"]
     budget["remaining_water_l"] = round((budget.get("target_water_l") or 0) - water["consumed_water_l"], 2)
+    # Long-term memory runs here automatically: every overview fetch (i.e.
+    # every dashboard/chat load) re-checks the last 7 days for patterns, so
+    # the coach's context always has the freshest findings without needing
+    # a separate scheduled job.
+    memory_agent.detect_patterns()
+    budget["patterns"] = memory_agent.get_active_patterns()["patterns"]
     return budget
 
 @app.post("/api/log-water")
@@ -83,6 +91,13 @@ def log_water(payload: WaterLogRequest):
 @app.get("/api/recent-meals")
 def get_recent_meals():
     return memory_agent.get_todays_logs()
+
+@app.get("/api/history")
+def get_history(days: int = 14):
+    """Full daily intake log: every meal, grouped by day, for the last
+    `days` days (default 14) -- the browsable record of everything ever
+    logged, not just today."""
+    return {"days": memory_agent.get_logs_history(days)}
 
 @app.post("/api/log-food")
 def log_food(payload: FoodLogRequest):
@@ -107,11 +122,23 @@ def get_patterns():
     memory_agent.detect_patterns()
     return memory_agent.get_active_patterns()
 
+@app.get("/api/chat/history")
+def chat_history():
+    return {"messages": memory_agent.get_chat_history()}
+
+@app.delete("/api/chat/history")
+def clear_chat_history():
+    return memory_agent.clear_chat_history()
+
 @app.post("/api/chat")
 def chat(payload: ChatRequest):
     if orchestrator.client is None:
         raise HTTPException(status_code=503, detail="AI coach is not configured. Create backend/.env and set OPENROUTER_API_KEY.")
+    history = memory_agent.get_chat_history()
+    memory_agent.save_chat_message("user", payload.message)
     try:
-        return {"reply": orchestrator.interact(payload.message)}
+        result = orchestrator.chat_with_tools(payload.message, history)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Coach provider error: {exc}") from exc
+    memory_agent.save_chat_message("assistant", result["reply"], result.get("tool_events"))
+    return {"reply": result["reply"], "tool_events": result.get("tool_events", []), "overview": get_overview(), "recent_meals": memory_agent.get_todays_logs()}
