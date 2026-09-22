@@ -157,4 +157,5 @@ def get_remaining_budget_today(log_date: str) -> dict:
         "target_protein_g": profile["target_protein_g"],
         "target_carbs_g": profile["target_carbs_g"],
         "target_fat_g": profile["target_fat_g"],
+        "target_water_l": profile["target_water_l"],
     }

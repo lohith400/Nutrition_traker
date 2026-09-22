@@ -1,25 +1,79 @@
-# Dependencies
+# =========================
+# Python virtual environments (any name, any location)
+# =========================
+venv/
+.venv/
+env/
+.env/
+ENV/
+env.bak/
+venv.bak/
+*/venv/
+*/.venv/
+backend/venv/
+backend/.venv/
+**/venv/
+**/.venv/
+pip-wheel-metadata/
+
+# =========================
+# Python cache & build artifacts
+# =========================
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# =========================
+# Node / Next.js (frontend)
+# =========================
 node_modules/
 frontend/node_modules/
-
-# Next.js build output
+**/node_modules/
 .next/
 frontend/.next/
 out/
+.turbo/
+next-env.d.ts.bak
 
-# Python cache & virtualenvs
-__pycache__/
-backend/__pycache__/
-*.py[cod]
-.venv/
-backend/.venv/
-
+# =========================
 # Environment variables & secrets
+# =========================
 .env
-.env*.local
+.env.*
+!.env.example
+!backend/.env.example
+!frontend/.env.example
 backend/.env
 frontend/.env.local
 
-# Databases
+# =========================
+# Databases (local/dev)
+# =========================
 *.db
+*.sqlite
+*.sqlite3
 nutrisync.db
+
+# =========================
+# Editor / OS junk
+# =========================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# =========================
+# Logs
+# =========================
+*.log
+npm-debug.log*

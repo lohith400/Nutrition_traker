@@ -45,6 +45,9 @@ class FoodLogRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
 
+class WaterLogRequest(BaseModel):
+    amount_l: float = Field(gt=0, le=5)
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "NutriSync API"}
@@ -64,7 +67,18 @@ def save_onboarding(payload: OnboardingRequest):
 
 @app.get("/api/overview")
 def get_overview():
-    return math_engine.get_remaining_budget_today(datetime.now().strftime("%Y-%m-%d"))
+    budget = math_engine.get_remaining_budget_today(datetime.now().strftime("%Y-%m-%d"))
+    if "error" in budget:
+        return budget
+    water = memory_agent.get_todays_water()
+    budget["consumed_water_l"] = water["consumed_water_l"]
+    budget["remaining_water_l"] = round((budget.get("target_water_l") or 0) - water["consumed_water_l"], 2)
+    return budget
+
+@app.post("/api/log-water")
+def log_water(payload: WaterLogRequest):
+    memory_agent.log_water(payload.amount_l)
+    return {"status": "logged", **get_overview()}
 
 @app.get("/api/recent-meals")
 def get_recent_meals():

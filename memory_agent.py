@@ -94,6 +94,43 @@ def get_todays_logs() -> dict:
     return {"date": today, "meals": [dict(r) for r in rows]}
 
 
+# ---------- Water tracking ----------
+
+def _ensure_water_table(conn) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS water_logs (
+               log_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+               log_date TEXT NOT NULL,
+               log_time TEXT NOT NULL,
+               amount_l REAL NOT NULL
+           )"""
+    )
+
+
+def log_water(amount_l: float) -> dict:
+    now = datetime.now()
+    conn = _get_conn()
+    _ensure_water_table(conn)
+    conn.execute(
+        "INSERT INTO water_logs (log_date, log_time, amount_l) VALUES (?, ?, ?)",
+        (now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d %H:%M:%S"), amount_l),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "logged"}
+
+
+def get_todays_water() -> dict:
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = _get_conn()
+    _ensure_water_table(conn)
+    row = conn.execute(
+        "SELECT COALESCE(SUM(amount_l),0) as total FROM water_logs WHERE log_date = ?", (today,)
+    ).fetchone()
+    conn.close()
+    return {"date": today, "consumed_water_l": round(row["total"], 2)}
+
+
 # ---------- Long-term memory: pattern detection ----------
 
 def detect_patterns() -> dict:

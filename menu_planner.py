@@ -38,12 +38,19 @@ def suggest_next_meal(remaining_protein_g: float, remaining_calories: float) -> 
     # "efficient" protein sources within a limited calorie budget
     protein_needed_ratio = remaining_protein_g / remaining_calories if remaining_calories > 0 else 0
 
+    # Same data-quality guard as math_engine.calculate_meal_macros: exclude
+    # source rows where per-100g fat is implausibly high (>=50g/100g, denser
+    # than pure oil), which are almost certainly data-entry errors upstream
+    # (e.g. "Masala vada" and "Tandoori chicken" both show this issue).
+    # Suggestions should never surface a food we already know is unreliable.
+    quality_filter = "AND fat_g_100g < 50"
+
     if protein_needed_ratio > 0.05:  # roughly: needs a high-protein option
         rows = conn.execute(
-            """SELECT food_name, unit_serving_energy_kcal, unit_serving_protein_g, servings_unit
+            f"""SELECT food_name, unit_serving_energy_kcal, unit_serving_protein_g, servings_unit
                FROM food_items
                WHERE unit_serving_protein_g > 0 AND unit_serving_energy_kcal > 0
-                 AND unit_serving_energy_kcal <= ?
+                 AND unit_serving_energy_kcal <= ? {quality_filter}
                ORDER BY (unit_serving_protein_g * 1.0 / unit_serving_energy_kcal) DESC
                LIMIT 5""",
             (remaining_calories,),
@@ -51,9 +58,9 @@ def suggest_next_meal(remaining_protein_g: float, remaining_calories: float) -> 
         strategy = "high_protein_priority"
     else:
         rows = conn.execute(
-            """SELECT food_name, unit_serving_energy_kcal, unit_serving_protein_g, servings_unit
+            f"""SELECT food_name, unit_serving_energy_kcal, unit_serving_protein_g, servings_unit
                FROM food_items
-               WHERE unit_serving_energy_kcal > 0 AND unit_serving_energy_kcal <= ?
+               WHERE unit_serving_energy_kcal > 0 AND unit_serving_energy_kcal <= ? {quality_filter}
                ORDER BY unit_serving_protein_g DESC
                LIMIT 5""",
             (remaining_calories,),
