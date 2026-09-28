@@ -26,6 +26,8 @@ NutriSync is a nutrition coach for Indian food. It combines deterministic nutrit
 
 ## Run in GitHub Codespaces or Linux/macOS
 
+First-time setup: The database is not committed to the repository and must be built once after cloning by running `python db_setup.py` from the repository root.
+
 Use two terminals. Do not commit `.env`, `.env.local`, `.venv`, `node_modules`, or `.next`.
 
 ### Terminal 1: backend
@@ -37,6 +39,8 @@ source backend/.venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r backend/requirements.txt
 cp backend/.env.example backend/.env
+# Creates nutrisync.db from data/anuvaad.xlsx
+python db_setup.py
 ```
 
 Edit `backend/.env` if you want coach chat:
@@ -96,6 +100,7 @@ py -m venv backend\.venv
 backend\.venv\Scripts\Activate.ps1
 pip install -r backend\requirements.txt
 Copy-Item backend\.env.example backend\.env
+python db_setup.py
 
 cd frontend
 Copy-Item .env.example .env.local
@@ -125,7 +130,7 @@ python -m uvicorn backend.app:app --reload --host 127.0.0.1 --port 8000
 
 ## Database warning
 
-The checked-in SQLite database is used by the existing modules. Only run `python db_setup.py` if the required tables are missing. It drops and recreates application tables and can remove stored profile and meal data.
+nutrisync.db is not committed (it is gitignored), so run `python db_setup.py` once after cloning; re-running it drops and recreates the application tables and deletes stored profile and meal data, so do not run it again on a database you want to keep.
 
 ## Security
 
