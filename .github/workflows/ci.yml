@@ -169,7 +169,7 @@ jobs:
         continue-on-error: true
 
       - name: Run Trivy Vulnerability Scanner (Repository Filesystem)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           scan-type: "fs"
           ignore-unfixed: true
