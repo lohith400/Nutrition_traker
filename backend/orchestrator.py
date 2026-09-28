@@ -1,7 +1,9 @@
 """NutriSync coach service used by both the CLI and FastAPI.
 
 The API key is deliberately read from the environment. The deterministic
-nutrition modules remain the source of truth for all numbers.
+nutrition modules remain the source of truth for all numbers and for which
+foods exist -- the model is only allowed to talk about foods that
+lookup_food / suggest_meal actually returned from the database.
 """
 import json
 import os
@@ -19,14 +21,15 @@ API_KEY = os.getenv("OPENROUTER_API_KEY")
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY) if API_KEY else None
 
 
-def tool_save_onboarding(name, age, sex, height_cm, current_weight_kg, target_weight_kg, goal, activity_level, allergies="", medical_conditions="", sleep_schedule=""):
+def tool_save_onboarding(name, age, sex, height_cm, current_weight_kg, target_weight_kg, goal, activity_level,
+                          allergies="", medical_conditions="", sleep_schedule="", diet="any"):
     bmr, tdee = math_engine.calculate_bmr_tdee(age, sex, height_cm, current_weight_kg, activity_level)
     targets = math_engine.calculate_targets(tdee, goal, current_weight_kg)
     profile = {
         "name": name, "age": age, "sex": sex, "height_cm": height_cm,
         "current_weight_kg": current_weight_kg, "target_weight_kg": target_weight_kg,
         "goal": goal, "activity_level": activity_level, "allergies": allergies,
-        "medical_conditions": medical_conditions, "sleep_schedule": sleep_schedule,
+        "medical_conditions": medical_conditions, "sleep_schedule": sleep_schedule, "diet": diet,
         "bmr_kcal": bmr, "tdee_kcal": tdee,
         "onboarded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **targets,
     }
@@ -34,14 +37,17 @@ def tool_save_onboarding(name, age, sex, height_cm, current_weight_kg, target_we
     return {"status": "onboarded", **profile}
 
 
-def tool_log_food_item(item_name, quantity, meal_type):
-    match = rag_resolver.resolve_food(item_name)
+def tool_log_food_item(item_name, quantity, meal_type, unit="serving"):
+    diet = memory_agent.get_user_diet()
+    match = rag_resolver.resolve_food(item_name, diet=diet)
     if match.get("status") != "matched":
-        return {"status": "not_found", "item": item_name}
-    macros = math_engine.calculate_meal_macros(match["matched_food_code"], quantity)
+        return match
+    macros = math_engine.calculate_meal_macros(match["matched_food_code"], quantity, unit)
     if "error" in macros:
         return macros
-    memory_agent.log_meal(meal_type, match["matched_food_code"], macros["food_name"], quantity, macros["calories"], macros["protein_g"], macros["carbs_g"], macros["fat_g"])
+    memory_agent.log_meal(meal_type, match["matched_food_code"], macros["food_name"], quantity,
+                           macros["calories"], macros["protein_g"], macros["carbs_g"], macros["fat_g"],
+                           unit=macros["unit"], serving_label=macros.get("serving_label"))
     return {"status": "logged", "matched_to": macros["food_name"], "match_confidence": match.get("confidence"), **macros}
 
 
@@ -51,21 +57,18 @@ def _context():
     budget = math_engine.get_remaining_budget_today(today)
     meals = memory_agent.get_todays_logs()
     # Long-term memory: re-check for behavioural patterns (e.g. recurring
-    # low breakfast protein) on every turn and hand any findings to the
-    # model, so the coach can proactively mention them instead of only
-    # reacting to what's asked.
+    # low breakfast protein, favourite foods, over/under-eating) on every
+    # turn and hand any findings to the model, so the coach can proactively
+    # mention them instead of only reacting to what's asked.
     memory_agent.detect_patterns()
     patterns = memory_agent.get_active_patterns()["patterns"]
-    return {"profile": profile, "budget": budget, "meals": meals, "detected_patterns": patterns}
+    facts = memory_agent.get_user_facts()
+    return {"profile": profile, "budget": budget, "meals": meals, "detected_patterns": patterns, "known_facts": facts}
 
 
 def interact(user_message: str) -> str:
-    """Answer a coach question using live profile, budget, and meal context.
-
-    Kept for backward compatibility with any caller that only wants a plain
-    text reply with no tool-calling. The chat endpoint now uses
-    `chat_with_tools` instead, which can actually look up and log food.
-    """
+    """Kept for backward compatibility with any caller that only wants a
+    plain text reply with no tool-calling."""
     if client is None:
         raise RuntimeError("OPENROUTER_API_KEY is not configured")
     context = _context()
@@ -86,13 +89,13 @@ def interact(user_message: str) -> str:
 # ---------------------------------------------------------------------------
 # Conversational tool-calling coach
 # ---------------------------------------------------------------------------
-# This is what actually powers the chat page: the model is given tools that
-# wrap the RAG resolver, math engine, and memory agent (the same modules the
-# CLI/API food-logging path uses), and it decides when to call them. The
-# model NEVER invents a calorie/macro number -- every number the user sees
-# came out of `lookup_food`/`log_food`, which call rag_resolver + math_engine
-# directly. The model's only job is conversation and deciding intent
-# (what food, how much, which meal, and whether the user actually confirmed).
+# The model is given tools that wrap the RAG resolver, math engine, and
+# memory agent. The model NEVER invents a calorie/macro number or a food
+# name -- every number and every food the user sees came out of
+# lookup_food / suggest_meal, which call rag_resolver + math_engine + the
+# real food_items table directly. The model's only job is conversation and
+# deciding intent (what food, how much, in what unit, which meal, and
+# whether the user actually confirmed).
 
 TOOLS = [
     {
@@ -101,15 +104,23 @@ TOOLS = [
             "name": "lookup_food",
             "description": (
                 "Resolve a colloquial Indian food name against the nutrition database "
-                "(RAG match + exact macro lookup) for a given quantity, WITHOUT logging "
-                "it yet. Always call this first whenever the user mentions eating or "
-                "drinking something, before you say any numbers or ask to log it."
+                "(RAG match + exact macro lookup), WITHOUT logging it yet. Always call this "
+                "first whenever the user mentions eating or drinking something, before you say "
+                "any numbers or ask to log it. If the user didn't say a quantity or a unit, call "
+                "this once with quantity=1 and unit='serving' to see what's available (the result "
+                "tells you whether a standard serving exists), then ask the user whether they mean "
+                "1 standard serving (e.g. 1 bowl / 1 plate / 1 piece -- use the exact unit name the "
+                "tool returns) or an amount in grams, before logging."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "item_name": {"type": "string", "description": "Food name as the user said it, e.g. 'idli', 'thatte idli', 'chai'."},
-                    "quantity": {"type": "number", "description": "Number of servings, e.g. 1, 2, 0.5. Default to 1 if the user didn't say."},
+                    "quantity": {"type": "number", "description": "Amount, in the given unit. Default to 1 if the user didn't say."},
+                    "unit": {
+                        "type": "string", "enum": ["serving", "grams"],
+                        "description": "'serving' = number of standard servings (e.g. 2 idlis). 'grams' = weight in grams (e.g. 150g paneer). Default 'serving'.",
+                    },
                 },
                 "required": ["item_name"],
             },
@@ -122,21 +133,23 @@ TOOLS = [
             "description": (
                 "Persist a food item to today's log. Only call this AFTER the user has "
                 "explicitly confirmed (e.g. 'yes', 'log it', 'add it to lunch') following "
-                "a prior lookup_food call in this conversation. Never call this on the "
-                "first mention of a food."
+                "a prior lookup_food call in this conversation, AND after the user has told "
+                "you (or you've otherwise established) whether the quantity is servings or "
+                "grams. Never call this on the first mention of a food, and never guess the unit."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "item_name": {"type": "string"},
                     "quantity": {"type": "number"},
+                    "unit": {"type": "string", "enum": ["serving", "grams"]},
                     "meal_type": {
                         "type": "string",
                         "enum": ["breakfast", "lunch", "dinner", "snack"],
                         "description": "Defaults to 'snack' if the user hasn't said which meal.",
                     },
                 },
-                "required": ["item_name", "quantity"],
+                "required": ["item_name", "quantity", "unit"],
             },
         },
     },
@@ -148,23 +161,64 @@ TOOLS = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "suggest_meal",
+            "description": (
+                "Suggest real foods FROM THE DATABASE ONLY that fit the user's remaining calorie/protein "
+                "budget for today. Always call this instead of naming foods from general knowledge when "
+                "the user asks what to eat, what meals to have, or how to hit their goals -- never invent "
+                "or suggest a food that didn't come back from this tool."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "meal_type": {
+                        "type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"],
+                        "description": "Which meal slot the suggestion is for, if the user specified one.",
+                    },
+                    "whole_day": {
+                        "type": "boolean",
+                        "description": "True if the user wants suggestions for the whole remaining day rather than one meal.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 
-def _tool_lookup_food(item_name, quantity=1):
-    match = rag_resolver.resolve_food(item_name)
+def _tool_lookup_food(item_name, quantity=1, unit="serving"):
+    diet = memory_agent.get_user_diet()
+    match = rag_resolver.resolve_food(item_name, diet=diet)
     if match.get("status") != "matched":
-        return {"status": "not_found", "item": item_name}
-    macros = math_engine.calculate_meal_macros(match["matched_food_code"], quantity)
+        return match
+    macros = math_engine.calculate_meal_macros(match["matched_food_code"], quantity, unit)
     if "error" in macros:
         return macros
     return {"status": "found", "match_confidence": match.get("confidence"), "match_method": match.get("match_method"), **macros}
 
 
+def _tool_suggest_meal(meal_type=None, whole_day=False):
+    diet = memory_agent.get_user_diet()
+    budget = math_engine.get_remaining_budget_today(datetime.now().strftime("%Y-%m-%d"))
+    if "error" in budget:
+        return budget
+    if whole_day:
+        return menu_planner.suggest_day_plan(
+            budget["remaining_calories"], budget["remaining_protein_g"],
+            budget["remaining_carbs_g"], budget["remaining_fat_g"], diet,
+        )
+    return menu_planner.suggest_next_meal(budget["remaining_protein_g"], budget["remaining_calories"], diet, meal_type)
+
+
 TOOL_IMPL = {
-    "lookup_food": lambda args: _tool_lookup_food(args.get("item_name", ""), args.get("quantity", 1) or 1),
-    "log_food": lambda args: tool_log_food_item(args.get("item_name", ""), args.get("quantity", 1) or 1, args.get("meal_type") or "snack"),
+    "lookup_food": lambda args: _tool_lookup_food(args.get("item_name", ""), args.get("quantity", 1) or 1, args.get("unit") or "serving"),
+    "log_food": lambda args: tool_log_food_item(args.get("item_name", ""), args.get("quantity", 1) or 1, args.get("meal_type") or "snack", args.get("unit") or "serving"),
     "get_today_summary": lambda args: _context(),
+    "suggest_meal": lambda args: _tool_suggest_meal(args.get("meal_type"), bool(args.get("whole_day"))),
 }
 
 MAX_TOOL_ROUNDS = 5
@@ -185,18 +239,33 @@ def chat_with_tools(user_message: str, history: list | None = None) -> dict:
     system = (
         "You are NutriSync India, a warm, concise Indian nutrition coach chatting inline in an app.\n"
         "Whenever the user mentions eating or drinking something, ALWAYS call lookup_food first to get "
-        "its real calories/protein/carbs/fat -- never guess or estimate nutrition numbers yourself.\n"
-        "After lookup_food returns a match, tell the user the matched food name, quantity, calories, "
-        "protein, carbs and fat, then ask if they'd like it logged to today's meals and as which meal "
-        "(breakfast/lunch/dinner/snack). Only call log_food once the user has clearly confirmed.\n"
+        "its real calories/protein/carbs/fat -- never guess, estimate, or recall nutrition numbers from "
+        "your own knowledge.\n"
+        "UNITS MATTER: lookup_food's result tells you whether the food has a standard serving (e.g. "
+        "'1 bowl', '1 plate', '1 idli') and/or can be logged by weight in grams. If the user didn't "
+        "already specify, ask them: 'Did you have about 1 <serving unit>, or would you rather log it in "
+        "grams?' Never assume -- entering a gram amount as if it were a serving count (or vice versa) "
+        "produces wildly wrong totals, which is exactly what you must avoid. If a food has no reliable "
+        "standard serving in the database (lookup_food will say so), grams is the only option -- ask for "
+        "the weight in grams.\n"
+        "After lookup_food returns a match, tell the user the matched food name, quantity + unit, "
+        "calories, protein, carbs and fat, then ask if they'd like it logged to today's meals and as "
+        "which meal (breakfast/lunch/dinner/snack). Only call log_food once the user has clearly "
+        "confirmed both the food and the unit.\n"
         "If lookup_food returns not_found, say so plainly, don't invent numbers, and ask them to rephrase "
-        "or try a simpler/more common name.\n"
+        "or try a simpler/more common name. If it returns diet_mismatch, tell them that food doesn't fit "
+        "their diet and ask if they'd like an alternative.\n"
+        "When the user asks what to eat, for meal ideas, or how to hit their goals, ALWAYS call "
+        "suggest_meal and present ONLY the foods it returns -- never suggest a food from your own "
+        "knowledge, even one that sounds healthy or plausible. If suggest_meal returns nothing useful, "
+        "say so honestly rather than filling in your own suggestions.\n"
         "If detected_patterns in the context is non-empty, weave a brief, supportive mention of the "
-        "most relevant one into your reply where it fits naturally (e.g. noticing low breakfast protein) "
-        "-- don't force it into every message.\n"
+        "most relevant one into your reply where it fits naturally (e.g. noticing low breakfast protein, "
+        "or a favourite food) -- don't force it into every message.\n"
         "Keep replies short (2-4 sentences) and conversational. Do not diagnose medical conditions; "
         "suggest professional advice for medical questions.\n"
-        f"Live context (profile, remaining budget, meals already logged today, detected long-term patterns):\n{json.dumps(context, default=str)}"
+        f"Live context (profile, remaining budget, meals already logged today, detected long-term "
+        f"patterns, known facts about the user):\n{json.dumps(context, default=str)}"
     )
 
     messages = [{"role": "system", "content": system}]
@@ -260,10 +329,7 @@ def tool_check_patterns():
 
 
 def tool_suggest_meal():
-    budget = tool_get_remaining_budget()
-    if "error" in budget:
-        return budget
-    return menu_planner.suggest_next_meal(budget["remaining_protein_g"], budget["remaining_calories"])
+    return _tool_suggest_meal()
 
 
 def tool_get_profile():

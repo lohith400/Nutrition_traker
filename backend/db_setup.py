@@ -1,19 +1,33 @@
 """
 NutriSync Database Setup
 =========================
-Run this once to build nutrisync.db from the Anuvaad Excel file and
-create every table the 5-agent system needs.
+Builds / upgrades nutrisync.db. Safe to run repeatedly: **user data is never
+dropped** (the previous version dropped daily_logs on every rebuild, which
+would have wiped a user's whole food history).
 
 Tables:
-  food_items       - 1,014 verified Indian foods (from Anuvaad/IFCT data)
-  user_profile      - the Dynamic User Profile (one row, this is a single-user app)
-  daily_logs        - every meal ever logged (short-term memory lives here: "today")
-  detected_patterns - long-term memory: trends noticed across many days
+  food_items        - 1,014 Indian foods (Anuvaad/IFCT) + data-quality grade + diet tag
+  user_profile      - the Dynamic User Profile (one row, single-user app)
+  daily_logs        - every meal ever logged (short-term = "today", long-term = history)
+  detected_patterns - long-term memory: trends noticed across days (one row per type)
+  food_preferences  - long-term memory: how often / when the user eats each food
+  user_facts        - long-term memory: things the user told us (diet, dislikes...)
+
+Usage:
+  python backend/db_setup.py            # create/upgrade, keep all user data
+  python backend/db_setup.py --reset    # wipe user data too (destructive!)
 """
 
-import sqlite3
-import openpyxl
 import os
+import sqlite3
+import sys
+
+import openpyxl
+
+try:
+    from backend import food_quality
+except ImportError:  # run as a script
+    import food_quality
 
 _DEFAULT_DB = (
     os.path.join(os.path.dirname(__file__), "..", "nutrisync.db")
@@ -27,102 +41,179 @@ EXCEL_PATH = (
     else os.path.join(os.path.dirname(__file__), "..", "data", "anuvaad.xlsx")
 )
 
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS food_items (
+    food_code                TEXT PRIMARY KEY,
+    food_name                TEXT NOT NULL,
+    energy_kcal_100g         REAL,
+    carb_g_100g              REAL,
+    protein_g_100g           REAL,
+    fat_g_100g               REAL,
+    fibre_g_100g             REAL,
+    servings_unit            TEXT,
+    unit_serving_energy_kcal REAL,
+    unit_serving_carb_g      REAL,
+    unit_serving_protein_g   REAL,
+    unit_serving_fat_g       REAL,
+    unit_serving_fibre_g     REAL
+);
 
-def build_database():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
+CREATE TABLE IF NOT EXISTS user_profile (
+    id                  INTEGER PRIMARY KEY CHECK (id = 1),
+    name                TEXT,
+    age                 INTEGER,
+    sex                 TEXT,
+    height_cm           REAL,
+    current_weight_kg   REAL,
+    target_weight_kg    REAL,
+    goal                TEXT,
+    activity_level      TEXT,
+    allergies           TEXT,
+    medical_conditions  TEXT,
+    sleep_schedule      TEXT,
+    bmr_kcal            REAL,
+    tdee_kcal           REAL,
+    target_calories     REAL,
+    target_protein_g    REAL,
+    target_carbs_g      REAL,
+    target_fat_g        REAL,
+    target_water_l      REAL,
+    onboarded_at        TEXT
+);
 
-    cur.executescript("""
-    DROP TABLE IF EXISTS food_items;
-    DROP TABLE IF EXISTS user_profile;
-    DROP TABLE IF EXISTS daily_logs;
-    DROP TABLE IF EXISTS detected_patterns;
+CREATE TABLE IF NOT EXISTS daily_logs (
+    log_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_date      TEXT NOT NULL,
+    log_time      TEXT NOT NULL,
+    meal_type     TEXT,
+    food_code     TEXT,
+    food_name     TEXT,
+    quantity      REAL,
+    calories      REAL,
+    protein_g     REAL,
+    carbs_g       REAL,
+    fat_g         REAL
+);
 
-    -- Real Indian food nutrition data, one row per dish.
-    -- Storing both per-100g and per-standard-serving numbers, exactly as
-    -- the source data provides, so the Math Engine never has to guess a
-    -- conversion factor.
-    CREATE TABLE food_items (
-        food_code               TEXT PRIMARY KEY,
-        food_name                TEXT NOT NULL,
-        energy_kcal_100g          REAL,
-        carb_g_100g               REAL,
-        protein_g_100g            REAL,
-        fat_g_100g                REAL,
-        fibre_g_100g              REAL,
-        servings_unit             TEXT,
-        unit_serving_energy_kcal  REAL,
-        unit_serving_carb_g       REAL,
-        unit_serving_protein_g    REAL,
-        unit_serving_fat_g        REAL,
-        unit_serving_fibre_g      REAL
-    );
+CREATE TABLE IF NOT EXISTS detected_patterns (
+    pattern_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    detected_on   TEXT NOT NULL,
+    pattern_type  TEXT,
+    description   TEXT,
+    still_active  INTEGER DEFAULT 1
+);
 
-    -- Single-user profile. All the onboarding answers + calculated targets.
-    CREATE TABLE user_profile (
-        id                  INTEGER PRIMARY KEY CHECK (id = 1),  -- enforces only 1 row ever
-        name                TEXT,
-        age                 INTEGER,
-        sex                 TEXT,
-        height_cm           REAL,
-        current_weight_kg   REAL,
-        target_weight_kg    REAL,
-        goal                TEXT,        -- fat_loss / muscle_gain / recomp / maintenance
-        activity_level      TEXT,        -- sedentary / casual / gym / bodybuilder
-        allergies           TEXT,
-        medical_conditions  TEXT,
-        sleep_schedule      TEXT,
-        bmr_kcal            REAL,
-        tdee_kcal           REAL,
-        target_calories     REAL,
-        target_protein_g    REAL,
-        target_carbs_g      REAL,
-        target_fat_g        REAL,
-        target_water_l      REAL,
-        onboarded_at        TEXT
-    );
+-- Long-term memory: one row per food the user has ever logged.
+CREATE TABLE IF NOT EXISTS food_preferences (
+    food_code       TEXT PRIMARY KEY,
+    food_name       TEXT,
+    times_logged    INTEGER DEFAULT 0,
+    first_eaten     TEXT,
+    last_eaten      TEXT,
+    breakfast_count INTEGER DEFAULT 0,
+    lunch_count     INTEGER DEFAULT 0,
+    dinner_count    INTEGER DEFAULT 0,
+    snack_count     INTEGER DEFAULT 0,
+    total_amount    REAL DEFAULT 0,
+    grams_count     INTEGER DEFAULT 0
+);
 
-    -- Every logged meal, ever. This IS short-term memory (query "today")
-    -- and the raw material long-term memory is built from (query "last 7 days").
-    CREATE TABLE daily_logs (
-        log_id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        log_date         TEXT NOT NULL,      -- YYYY-MM-DD
-        log_time         TEXT NOT NULL,      -- full timestamp
-        meal_type        TEXT,               -- breakfast/lunch/dinner/snack
-        food_code        TEXT,
-        food_name        TEXT,
-        quantity         REAL,
-        calories         REAL,
-        protein_g        REAL,
-        carbs_g          REAL,
-        fat_g            REAL
-    );
+-- Long-term memory: explicit facts the user told us (diet, dislikes, notes...).
+CREATE TABLE IF NOT EXISTS user_facts (
+    fact_key    TEXT PRIMARY KEY,
+    fact_value  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+"""
 
-    -- Long-term memory: trends noticed by the Memory Agent across many
-    -- days, e.g. "low breakfast protein, 3 days running". The Orchestrator
-    -- reads this to sound like it actually knows the user's habits.
-    CREATE TABLE detected_patterns (
-        pattern_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-        detected_on      TEXT NOT NULL,
-        pattern_type     TEXT,       -- e.g. 'low_protein_breakfast', 'weekend_drift'
-        description      TEXT,
-        still_active      INTEGER DEFAULT 1
-    );
-    """)
+# Columns added after the first release. (table, column, DDL type)
+MIGRATIONS = [
+    ("food_items", "serving_grams", "REAL"),
+    ("food_items", "quality", "TEXT"),
+    ("food_items", "quality_note", "TEXT"),
+    ("food_items", "diet_tag", "TEXT"),
+    ("daily_logs", "unit", "TEXT DEFAULT 'serving'"),
+    ("daily_logs", "serving_label", "TEXT"),
+    ("user_profile", "diet", "TEXT DEFAULT 'any'"),
+]
+
+
+def _columns(conn, table):
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def refresh_food_quality(conn) -> int:
+    """(Re)grade every food row. Cheap (1k rows), idempotent."""
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("SELECT * FROM food_items").fetchall()
+    for r in rows:
+        q = food_quality.assess(r)
+        conn.execute(
+            "UPDATE food_items SET quality=?, quality_note=?, serving_grams=?, diet_tag=? WHERE food_code=?",
+            (q["quality"], q["quality_note"], q["serving_grams"], food_quality.diet_tag(r["food_name"]), r["food_code"]),
+        )
+    return len(rows)
+
+
+def rebuild_food_preferences(conn) -> None:
+    """Recompute long-term food habits from the raw log (used on migration)."""
+    conn.execute("DELETE FROM food_preferences")
+    conn.execute(
+        """INSERT INTO food_preferences
+           (food_code, food_name, times_logged, first_eaten, last_eaten,
+            breakfast_count, lunch_count, dinner_count, snack_count, total_amount, grams_count)
+           SELECT food_code, MAX(food_name), COUNT(*), MIN(log_date), MAX(log_date),
+                  SUM(meal_type='breakfast'), SUM(meal_type='lunch'),
+                  SUM(meal_type='dinner'), SUM(meal_type='snack'),
+                  SUM(quantity), SUM(COALESCE(unit,'serving')='grams')
+           FROM daily_logs WHERE food_code IS NOT NULL GROUP BY food_code"""
+    )
+
+
+def ensure_schema(db_path=None) -> None:
+    """Create missing tables, add missing columns, dedupe patterns. Never drops data."""
+    path = db_path or DB_PATH
+    conn = sqlite3.connect(path)
+    conn.executescript(SCHEMA)
+    for table, column, ddl in MIGRATIONS:
+        if column not in _columns(conn, table):
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+    # Old versions inserted a fresh pattern row on every chat message. Keep the
+    # newest per type, then enforce one-row-per-type going forward.
+    conn.execute(
+        "DELETE FROM detected_patterns WHERE pattern_id NOT IN "
+        "(SELECT MAX(pattern_id) FROM detected_patterns GROUP BY pattern_type)"
+    )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pattern_type ON detected_patterns(pattern_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_date ON daily_logs(log_date)")
+
+    needs_grading = conn.execute(
+        "SELECT COUNT(*) FROM food_items WHERE quality IS NULL"
+    ).fetchone()[0]
+    if needs_grading:
+        refresh_food_quality(conn)
+
+    conn.row_factory = None
+    has_prefs = conn.execute("SELECT COUNT(*) FROM food_preferences").fetchone()[0]
+    has_logs = conn.execute("SELECT COUNT(*) FROM daily_logs").fetchone()[0]
+    if has_logs and not has_prefs:
+        rebuild_food_preferences(conn)
     conn.commit()
+    conn.close()
 
-    # Load the Excel data into food_items
+
+def load_foods(conn) -> int:
     wb = openpyxl.load_workbook(EXCEL_PATH, read_only=True, data_only=True)
     ws = wb["Sheet1"]
     rows = ws.iter_rows(values_only=True)
     header = next(rows)
     col = {name: i for i, name in enumerate(header)}
-
     inserted = 0
     for row in rows:
         if not row[col["food_name"]]:
             continue
-        cur.execute(
+        conn.execute(
             """INSERT OR REPLACE INTO food_items
                (food_code, food_name, energy_kcal_100g, carb_g_100g, protein_g_100g,
                 fat_g_100g, fibre_g_100g, servings_unit, unit_serving_energy_kcal,
@@ -130,27 +221,46 @@ def build_database():
                 unit_serving_fibre_g)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                row[col["food_code"]],
-                row[col["food_name"]],
-                row[col["energy_kcal"]],
-                row[col["carb_g"]],
-                row[col["protein_g"]],
-                row[col["fat_g"]],
-                row[col["fibre_g"]],
-                row[col["servings_unit"]],
-                row[col["unit_serving_energy_kcal"]],
-                row[col["unit_serving_carb_g"]],
-                row[col["unit_serving_protein_g"]],
-                row[col["unit_serving_fat_g"]],
-                row[col["unit_serving_fibre_g"]],
+                row[col["food_code"]], row[col["food_name"]], row[col["energy_kcal"]],
+                row[col["carb_g"]], row[col["protein_g"]], row[col["fat_g"]], row[col["fibre_g"]],
+                row[col["servings_unit"]], row[col["unit_serving_energy_kcal"]],
+                row[col["unit_serving_carb_g"]], row[col["unit_serving_protein_g"]],
+                row[col["unit_serving_fat_g"]], row[col["unit_serving_fibre_g"]],
             ),
         )
         inserted += 1
+    return inserted
 
+
+def build_database(reset_user_data: bool = False) -> None:
+    """Create/upgrade the DB and (re)load the food table. User data is kept
+    unless reset_user_data=True."""
+    if reset_user_data:
+        conn = sqlite3.connect(DB_PATH)
+        conn.executescript(
+            "DROP TABLE IF EXISTS user_profile; DROP TABLE IF EXISTS daily_logs; "
+            "DROP TABLE IF EXISTS detected_patterns; DROP TABLE IF EXISTS food_preferences; "
+            "DROP TABLE IF EXISTS user_facts; DROP TABLE IF EXISTS chat_messages; "
+            "DROP TABLE IF EXISTS water_logs;"
+        )
+        conn.commit()
+        conn.close()
+
+    ensure_schema(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
+    inserted = load_foods(conn)
+    refresh_food_quality(conn)
     conn.commit()
+    graded = dict(conn.execute("SELECT quality, COUNT(*) FROM food_items GROUP BY quality").fetchall())
     conn.close()
-    print(f"Database built at {DB_PATH} -- {inserted} food items loaded.")
+    print(f"Database ready at {DB_PATH} -- {inserted} foods loaded. Data quality: {graded}")
 
 
 if __name__ == "__main__":
-    build_database()
+    if "--reset" in sys.argv:
+        confirm = input("This DELETES all logged meals, profile and chat history. Type 'yes' to continue: ")
+        if confirm.strip().lower() != "yes":
+            sys.exit("Aborted.")
+        build_database(reset_user_data=True)
+    else:
+        build_database()

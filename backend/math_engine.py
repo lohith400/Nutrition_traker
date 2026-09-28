@@ -5,10 +5,32 @@ Plain Python. NOT an LLM. This is deliberate: LLMs are unreliable at
 arithmetic, so every calorie/macro number the user sees must be computed
 here, not guessed by a model. The LLM-based agents only ever consume the
 numbers this file produces -- they never compute them.
+
+Unit handling (this used to be the source of the "20,000 calorie" bug):
+food_items stores BOTH a per-100g row and a per-standard-serving row. The
+old code always multiplied the per-serving numbers by `quantity`, so typing
+"100" meaning "100 grams" actually meant "100 servings" and blew up to
+huge, nonsensical totals. Now every call is explicit about which unit the
+quantity is in:
+
+  unit="serving"  -> quantity is a number of standard servings (e.g. 2 idlis)
+                      uses unit_serving_* columns
+  unit="grams"    -> quantity is a weight in grams (e.g. 150g paneer)
+                      uses *_100g columns, scaled by quantity/100
+
+If the food has no usable serving in the source data (quality='grams_only'
+or 'unreliable'), only unit="grams" is accepted -- callers should always
+check food_items.quality / serving info (via rag_resolver) first and ask
+the user for grams when there's no serving to offer.
 """
 
 import sqlite3
 import os
+
+try:
+    from backend import food_quality
+except ImportError:
+    import food_quality
 
 _DEFAULT_DB = (
     os.path.join(os.path.dirname(__file__), "..", "nutrisync.db")
@@ -16,6 +38,9 @@ _DEFAULT_DB = (
     else os.path.join(os.path.dirname(__file__), "nutrisync.db")
 )
 DB_PATH = os.getenv("NUTRISYNC_DB_PATH", _DEFAULT_DB)
+
+MAX_SERVINGS = 20     # sanity ceiling: nobody logs 100 servings of one dish
+MAX_GRAMS = 2000       # sanity ceiling: 2kg of a single food in one entry
 
 
 def _get_conn():
@@ -85,19 +110,30 @@ def calculate_targets(tdee, goal, weight_kg):
     }
 
 
-def calculate_meal_macros(food_code: str, quantity: float) -> dict:
+def calculate_meal_macros(food_code: str, quantity: float, unit: str = "serving") -> dict:
     """
-    Given a resolved food_code (from the RAG agent) and a quantity in
-    SERVINGS (e.g. 2 idlis = quantity 2), returns exact macros using the
-    real per-serving data from food_items. This is a straight lookup +
-    multiplication -- no ambiguity, no model involved.
+    Given a resolved food_code and a quantity, returns exact macros.
+    Straight lookup + multiplication -- no ambiguity, no model involved.
 
-    Includes a data-sanity check: the Anuvaad source data has a small
-    number of rows with implausible values (e.g. fat content denser than
-    pure oil), likely data-entry errors upstream. Rather than silently
-    presenting a wrong number as fact, flagged rows return a warning so
-    the Orchestrator can ask the user to double check instead of trusting it.
+    unit="serving": quantity is servings, uses unit_serving_* columns.
+                    Rejected if the food has no usable serving data
+                    (quality != 'ok') -- caller should fall back to grams.
+    unit="grams":   quantity is a weight in grams, uses *_100g columns
+                    scaled by quantity/100. Always available for any food
+                    with an energy value, regardless of quality grade.
+
+    Every result carries `quality` / `quality_note` so a shaky source row
+    is flagged, never silently presented as fact.
     """
+    if unit not in ("serving", "grams"):
+        return {"error": f"Invalid unit '{unit}', must be 'serving' or 'grams'."}
+    if quantity is None or quantity <= 0:
+        return {"error": "Quantity must be a positive number."}
+    if unit == "serving" and quantity > MAX_SERVINGS:
+        return {"error": f"{quantity} servings looks too large for one log entry (max {MAX_SERVINGS}). Did you mean grams?"}
+    if unit == "grams" and quantity > MAX_GRAMS:
+        return {"error": f"{quantity}g looks too large for one log entry (max {MAX_GRAMS}g)."}
+
     conn = _get_conn()
     row = conn.execute("SELECT * FROM food_items WHERE food_code = ?", (food_code,)).fetchone()
     conn.close()
@@ -105,27 +141,53 @@ def calculate_meal_macros(food_code: str, quantity: float) -> dict:
     if row is None:
         return {"error": f"Unknown food_code: {food_code}"}
 
-    result = {
-        "food_code": food_code,
-        "food_name": row["food_name"],
-        "quantity": quantity,
-        "unit": row["servings_unit"],
-        "calories": round((row["unit_serving_energy_kcal"] or 0) * quantity, 1),
-        "protein_g": round((row["unit_serving_protein_g"] or 0) * quantity, 1),
-        "carbs_g": round((row["unit_serving_carb_g"] or 0) * quantity, 1),
-        "fat_g": round((row["unit_serving_fat_g"] or 0) * quantity, 1),
-    }
+    quality = row["quality"] or "unreliable"
 
-    # Sanity check: pure fat/oil is ~100g fat per 100g. Anything at or
-    # above that in the source's per-100g column is almost certainly a
-    # data error, not a real food.
-    if (row["fat_g_100g"] or 0) >= 50:
+    if unit == "serving":
+        if quality != "ok" or not row["servings_unit"] or not (row["unit_serving_energy_kcal"] or 0):
+            return {
+                "error": (
+                    f"'{row['food_name']}' doesn't have a reliable standard-serving size in the "
+                    "database. Please log it by weight in grams instead."
+                ),
+                "food_name": row["food_name"],
+                "quality": quality,
+                "fallback_unit": "grams",
+            }
+        result = {
+            "food_code": food_code,
+            "food_name": row["food_name"],
+            "quantity": quantity,
+            "unit": "serving",
+            "serving_label": row["servings_unit"],
+            "calories": round((row["unit_serving_energy_kcal"] or 0) * quantity, 1),
+            "protein_g": round((row["unit_serving_protein_g"] or 0) * quantity, 1),
+            "carbs_g": round((row["unit_serving_carb_g"] or 0) * quantity, 1),
+            "fat_g": round((row["unit_serving_fat_g"] or 0) * quantity, 1),
+        }
+    else:  # grams
+        if not (row["energy_kcal_100g"] or 0):
+            return {"error": f"No per-100g nutrition data for '{row['food_name']}'.", "food_name": row["food_name"]}
+        factor = quantity / 100.0
+        result = {
+            "food_code": food_code,
+            "food_name": row["food_name"],
+            "quantity": quantity,
+            "unit": "grams",
+            "serving_label": f"{quantity:g}g",
+            "calories": round((row["energy_kcal_100g"] or 0) * factor, 1),
+            "protein_g": round((row["protein_g_100g"] or 0) * factor, 1),
+            "carbs_g": round((row["carb_g_100g"] or 0) * factor, 1),
+            "fat_g": round((row["fat_g_100g"] or 0) * factor, 1),
+        }
+
+    result["quality"] = quality
+    if row["quality_note"]:
         result["data_quality_warning"] = (
-            f"Source data for '{row['food_name']}' looks off (unusually high fat value). "
-            "Treat this number with caution and consider asking the user to confirm or "
-            "log a similar, better-behaved item instead."
+            f"Source data for '{row['food_name']}' looks unreliable ({row['quality_note']}). "
+            "Treat this number with caution and consider confirming or logging a similar, "
+            "better-behaved item instead."
         )
-
     return result
 
 

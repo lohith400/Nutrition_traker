@@ -19,7 +19,14 @@ function ToolCard({ event }: { event: ToolEvent }) {
     }
     return (
       <div className="tool-card tool-card-found">
-        <div className="tool-card-head"><Search size={14} /> Found in database: <b>{String(result.food_name)}</b> {result.quantity ? `× ${result.quantity}` : ""}</div>
+        <div className="tool-card-head">
+          <Search size={14} /> Found in database: <b>{String(result.food_name)}</b>{" "}
+          {result.quantity
+            ? result.unit === "grams"
+              ? `× ${result.quantity}g`
+              : `× ${result.quantity} ${result.serving_label || "serving"}${Number(result.quantity) === 1 ? "" : "s"}`
+            : ""}
+        </div>
         <div className="tool-card-macros">
           <span><b>{String(result.calories)}</b> kcal</span>
           <span><b>{String(result.protein_g)}g</b> protein</span>

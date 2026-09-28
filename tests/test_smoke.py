@@ -122,3 +122,57 @@ def test_chat_without_api_key_returns_503(test_client):
     res = test_client.post("/api/chat", json={"message": "Hello coach"})
     assert res.status_code == 503
     assert "AI coach is not configured" in res.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for the reported bugs: unit confusion (the "20,000 kcal"
+# bug), suggestions that ignore the real database, and no diet awareness.
+# ---------------------------------------------------------------------------
+
+def test_grams_are_not_multiplied_like_servings(test_client):
+    """100 GRAMS of a food must use the per-100g row, not the per-serving
+    row multiplied by 100 (the original bug: 'Paneer soup x100' -> 29,224 kcal)."""
+    res = test_client.post("/api/log-food", json={"item_name": "Paneer soup", "quantity": 100, "unit": "grams", "meal_type": "lunch"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["unit"] == "grams"
+    assert data["calories"] < 500  # a sane value for 100g of soup, not tens of thousands
+
+
+def test_large_serving_quantity_is_rejected_not_multiplied(test_client):
+    """100 SERVINGS should be rejected outright rather than silently producing
+    an enormous, meaningless total."""
+    res = test_client.post("/api/log-food", json={"item_name": "Paneer soup", "quantity": 100, "unit": "serving", "meal_type": "lunch"})
+    assert res.status_code == 422
+    assert "too large" in res.json()["detail"].lower()
+
+
+def test_unreliable_source_row_is_not_offered_as_a_serving(test_client):
+    """Paneer pulao's source 'per plate' value is a whole-recipe total
+    (~4,876 kcal) -- it must be flagged unreliable and refuse serving-based
+    logging rather than presenting that number as one plate."""
+    res = test_client.post("/api/log-food", json={"item_name": "Paneer pulao", "quantity": 1, "unit": "serving", "meal_type": "lunch"})
+    assert res.status_code == 422
+    assert "grams" in res.json()["detail"].lower()
+
+
+def test_suggestions_only_return_real_database_foods(test_client):
+    res = test_client.get("/api/suggestions")
+    assert res.status_code == 200
+    data = res.json()
+    if data.get("status") == "ok":
+        assert all("food_name" in o for o in data["options"])
+
+
+def test_vegetarian_diet_blocks_meat_matches(test_client):
+    """Setting diet=vegetarian must stop a chicken dish from ever being
+    matched, even on a strong lexical hit."""
+    onboard = {
+        "name": "Veg User", "age": 30, "sex": "female", "height_cm": 160.0,
+        "current_weight_kg": 60.0, "target_weight_kg": 58.0, "goal": "maintenance",
+        "activity_level": "casual", "diet": "vegetarian",
+    }
+    res = test_client.post("/api/profile/onboarding", json=onboard)
+    assert res.status_code == 200
+    res = test_client.post("/api/log-food", json={"item_name": "chicken curry", "quantity": 1, "unit": "serving", "meal_type": "lunch"})
+    assert res.status_code == 409
