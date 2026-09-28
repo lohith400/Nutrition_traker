@@ -21,12 +21,12 @@ export function VoiceInputButton({ onTranscript, isLoading }: VoiceInputButtonPr
   const recognitionRef = useRef<any>(null);
 
   const startRecording = () => {
-    // Suppress error if browser doesn't support it
+    // Initialize speech recognition on first use
     if (!recognitionRef.current) {
       try {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         if (!SpeechRecognition) {
-          // Silently fail - voice not supported
+          console.warn("Web Speech API not supported in this browser");
           return;
         }
         recognitionRef.current = new SpeechRecognition();
@@ -34,7 +34,11 @@ export function VoiceInputButton({ onTranscript, isLoading }: VoiceInputButtonPr
         recognitionRef.current.continuous = false;
         recognitionRef.current.interimResults = false;
 
-        recognitionRef.current.onstart = () => setIsRecording(true);
+        recognitionRef.current.onstart = () => {
+          setIsRecording(true);
+          setError(null);
+        };
+
         recognitionRef.current.onresult = (event: any) => {
           if (event.results && event.results[0]) {
             const transcript = event.results[0][0].transcript;
@@ -42,29 +46,45 @@ export function VoiceInputButton({ onTranscript, isLoading }: VoiceInputButtonPr
           }
           setIsRecording(false);
         };
+
         recognitionRef.current.onerror = (event: any) => {
           setError(`Voice error: ${event.error}`);
           setIsRecording(false);
         };
-        recognitionRef.current.onend = () => setIsRecording(false);
+
+        recognitionRef.current.onend = () => {
+          setIsRecording(false);
+        };
       } catch (err) {
-        // Silently handle errors
-        return;
+        console.error("Failed to initialize speech recognition:", err);
+        setError("Voice not supported");
       }
     }
 
-    try {
-      if (isRecording) {
+    // Toggle recording
+    if (isRecording) {
+      try {
         recognitionRef.current?.stop();
-        setIsRecording(false);
-      } else {
+      } catch (err) {
+        console.error("Error stopping recording:", err);
+      }
+    } else {
+      try {
         setError(null);
         recognitionRef.current?.start();
+      } catch (err) {
+        console.error("Error starting recording:", err);
+        setError("Could not start recording");
       }
-    } catch (err) {
-      // Silently handle errors
     }
   };
+
+  if (!recognitionRef.current && typeof window !== "undefined") {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      return null; // Don't render if not supported
+    }
+  }
 
   return (
     <div className="voice-button-group">
