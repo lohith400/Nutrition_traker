@@ -20,9 +20,13 @@ function timeGreeting(): string {
   return "Good night";
 }
 
+function fmt(n: number): string {
+  return String(Math.round((Number(n) || 0) * 10) / 10);
+}
+
 function Stat({ label, value, goal, unit, color, Icon }: { label: string; value: number; goal: number; unit: string; color: string; Icon: typeof Flame }) {
   const percent = goal ? Math.min(100, value / goal * 100) : 0;
-  return <div className="stat-card"><div className="stat-topline"><span className={`stat-icon ${color}`}><Icon size={17} /></span>{label}<span className="stat-more">···</span></div><div className="stat-number">{value}<small>{unit}</small></div><div className="progress-track"><span className={`progress-fill ${color}`} style={{ width: `${percent}%` }} /></div><div className="stat-meta"><span>{Math.round(percent)}% of goal</span><b>{goal}{unit}</b></div></div>;
+  return <div className="stat-card"><div className="stat-topline"><span className={`stat-icon ${color}`}><Icon size={17} /></span>{label}<span className="stat-more">···</span></div><div className="stat-number"><span className="stat-value">{fmt(value)}</span><small>{unit}</small></div><div className="progress-track"><span className={`progress-fill ${color}`} style={{ width: `${percent}%` }} /></div><div className="stat-meta"><span>{Math.round(percent)}% of goal</span><b>{fmt(goal)}{unit}</b></div></div>;
 }
 
 export default function Page() {

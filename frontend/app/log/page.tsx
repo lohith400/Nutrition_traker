@@ -30,19 +30,34 @@ export default function LogPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch(`${API}/api/profile`).then(r => r.json()).then(setProfile).catch(() => {});
-    Promise.all([
-      fetch(`${API}/api/history?days=21`).then(r => r.json()),
-      fetch(`${API}/api/patterns`).then(r => r.json()),
-    ])
-      .then(([history, patternData]) => {
-        const list: DayEntry[] = history.days || [];
-        setDays(list);
-        setPatterns(patternData.patterns || []);
-        if (list.length) setOpenDate(list[0].date);
-      })
-      .catch(() => setError("Backend unavailable. Start FastAPI on port 8000."))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    const load = (first: boolean) => {
+      fetch(`${API}/api/profile`).then(r => r.json()).then(p => { if (!cancelled) setProfile(p); }).catch(() => {});
+      Promise.all([
+        fetch(`${API}/api/history?days=21`, { cache: "no-store" }).then(r => r.json()),
+        fetch(`${API}/api/patterns`, { cache: "no-store" }).then(r => r.json()),
+      ])
+        .then(([history, patternData]) => {
+          if (cancelled) return;
+          const list: DayEntry[] = history.days || [];
+          setDays(list);
+          setPatterns(patternData.patterns || []);
+          setError("");
+          if (first && list.length) setOpenDate(list[0].date);
+        })
+        .catch(() => { if (!cancelled) setError("Backend unavailable. Start FastAPI on port 8000."); })
+        .finally(() => { if (!cancelled) setLoading(false); });
+    };
+    load(true);
+    // Foods logged in the coach chat show up as soon as you come back to this tab.
+    const onVisible = () => { if (document.visibilityState === "visible") load(false); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
   }, []);
 
   const name = profile?.name || "there";

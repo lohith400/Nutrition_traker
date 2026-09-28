@@ -7,6 +7,7 @@ lookup_food / suggest_meal actually returned from the database.
 """
 import json
 import os
+import re
 from datetime import datetime
 
 from openai import OpenAI
@@ -48,7 +49,42 @@ def tool_log_food_item(item_name, quantity, meal_type, unit="serving"):
     memory_agent.log_meal(meal_type, match["matched_food_code"], macros["food_name"], quantity,
                            macros["calories"], macros["protein_g"], macros["carbs_g"], macros["fat_g"],
                            unit=macros["unit"], serving_label=macros.get("serving_label"))
-    return {"status": "logged", "matched_to": macros["food_name"], "match_confidence": match.get("confidence"), **macros}
+    budget = math_engine.get_remaining_budget_today(datetime.now().strftime("%Y-%m-%d"))
+    today_totals = None if "error" in budget else {
+        "calories": round(budget["consumed_calories"], 1), "protein_g": round(budget["consumed_protein_g"], 1),
+        "carbs_g": round(budget["consumed_carbs_g"], 1), "fat_g": round(budget["consumed_fat_g"], 1),
+        "remaining_calories": budget["remaining_calories"], "remaining_protein_g": budget["remaining_protein_g"],
+    }
+    return {"status": "logged", "matched_to": macros["food_name"], "match_confidence": match.get("confidence"),
+            "today_totals": today_totals, **macros}
+
+
+# The model sometimes *says* it logged a food without ever calling log_food
+# (or after log_food returned an error). Nothing is saved in that case, so the
+# food never reaches the Food log page. These helpers catch that claim.
+_LOGGED_CLAIM = re.compile(
+    r"\b(i['\u2019]?ve|i have|i just|i)\s+(just\s+)?(logged|added|saved|recorded)\b"
+    r"|\bsuccessfully\s+(logged|added|saved)\b"
+    r"|\b(logged|added|saved)\s+(it|that|them|this)\s+(to|in|into)\b"
+    r"|\bhas been (logged|added|saved) to\b",
+    re.IGNORECASE,
+)
+
+
+def _claims_logged(text: str) -> bool:
+    return bool(text and _LOGGED_CLAIM.search(text))
+
+
+def _log_succeeded(events: list) -> bool:
+    return any(e.get("tool") == "log_food" and (e.get("result") or {}).get("status") == "logged" for e in events)
+
+
+def _last_log_error(events: list) -> str:
+    for e in reversed(events):
+        if e.get("tool") == "log_food" and (e.get("result") or {}).get("status") != "logged":
+            r = e.get("result") or {}
+            return str(r.get("error") or r.get("message") or r.get("status") or "unknown error")
+    return ""
 
 
 def _context():
@@ -252,6 +288,10 @@ def chat_with_tools(user_message: str, history: list | None = None) -> dict:
         "calories, protein, carbs and fat, then ask if they'd like it logged to today's meals and as "
         "which meal (breakfast/lunch/dinner/snack). Only call log_food once the user has clearly "
         "confirmed both the food and the unit.\n"
+        "NEVER say a food was logged/added/saved unless log_food returned status 'logged' in THIS turn. "
+        "If the user confirms ('yes', 'log it', 'add it') you MUST call log_food -- do not just reply that it is done. "
+        "If log_food fails, tell the user it was NOT logged and why. Never recite today's totals from memory: "
+        "use the 'today_totals' returned by log_food or the meals in the live context below.\n"
         "If lookup_food returns not_found, say so plainly, don't invent numbers, and ask them to rephrase "
         "or try a simpler/more common name. If it returns diet_mismatch, tell them that food doesn't fit "
         "their diet and ask if they'd like an alternative.\n"
@@ -271,11 +311,17 @@ def chat_with_tools(user_message: str, history: list | None = None) -> dict:
     messages = [{"role": "system", "content": system}]
     for turn in (history or []):
         if turn.get("role") in ("user", "assistant") and turn.get("content"):
-            messages.append({"role": turn["role"], "content": turn["content"]})
+            content = turn["content"]
+            # An earlier assistant turn that claimed a log which never happened
+            # would teach the model to keep doing it -- flag it in the transcript.
+            if turn["role"] == "assistant" and _claims_logged(content) and not _log_succeeded(turn.get("tool_events") or []):
+                content += "\n\n[System note: nothing was actually saved to the food log in this message.]"
+            messages.append({"role": turn["role"], "content": content})
     messages.append({"role": "user", "content": user_message})
 
     tool_events = []
-    for _ in range(MAX_TOOL_ROUNDS):
+    nudged = False
+    for _ in range(MAX_TOOL_ROUNDS + 1):
         response = client.chat.completions.create(
             model=MODEL,
             messages=messages,
@@ -286,7 +332,21 @@ def chat_with_tools(user_message: str, history: list | None = None) -> dict:
         msg = response.choices[0].message
 
         if not msg.tool_calls:
-            return {"reply": msg.content or "I could not generate a response right now.", "tool_events": tool_events}
+            reply = msg.content or "I could not generate a response right now."
+            if _claims_logged(reply) and not _log_succeeded(tool_events):
+                if not nudged:
+                    # Ask the model to actually call log_food (or retract the claim).
+                    nudged = True
+                    messages.append({"role": "assistant", "content": reply})
+                    messages.append({"role": "system", "content": (
+                        "Your last reply says a food was logged, but log_food has not succeeded in this turn, so nothing "
+                        "was saved. If the user confirmed logging, call log_food now using the food, quantity, unit and "
+                        "meal from the conversation. Otherwise reply again WITHOUT claiming anything was logged.")})
+                    continue
+                error = _last_log_error(tool_events)
+                reply = ("I couldn't save that to your food log" + (f" ({error})" if error else "") +
+                         ". Nothing was added yet -- tell me the food, amount and meal again and I'll retry.")
+            return {"reply": reply, "tool_events": tool_events}
 
         messages.append({
             "role": "assistant",

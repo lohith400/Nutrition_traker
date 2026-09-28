@@ -1,13 +1,29 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { CheckCircle2, Mic, Search, Send, Sparkles, Square, Trash2, Volume2, VolumeX } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Mic, Plus, Search, Send, Sparkles, Square, Trash2, Volume2, VolumeX } from "lucide-react";
 import Shell, { API } from "../components/Shell";
 import { useVoiceChat } from "../hooks/useVoiceChat";
 
 type ToolEvent = { tool: string; args: Record<string, unknown>; result: Record<string, unknown> };
 type ChatMsg = { role: "user" | "assistant"; content: string; tool_events?: ToolEvent[]; created_at?: string; pending?: boolean };
 type Profile = { name?: string };
+type ChatDay = { date: string; messages: number; preview: string };
+
+function localToday(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function dayLabel(iso: string, today: string): string {
+  if (iso === today) return "Today";
+  const date = new Date(`${iso}T00:00:00`);
+  const yesterday = new Date(`${today}T00:00:00`);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
 
 const PHASE_LABEL = { idle: "", listening: "Listening… speak now", thinking: "Coach is thinking…", speaking: "Coach is speaking… tap to interrupt" } as const;
 
@@ -38,7 +54,10 @@ function ToolCard({ event }: { event: ToolEvent }) {
     );
   }
   if (tool === "log_food") {
-    if (result.status !== "logged") return null;
+    if (result.status !== "logged") {
+      const reason = String(result.error || result.message || result.status || "unknown error");
+      return <div className="tool-card tool-card-warn"><AlertTriangle size={14} /> Not logged — {reason}</div>;
+    }
     return <div className="tool-card tool-card-logged"><CheckCircle2 size={14} /> Logged <b>{String(result.matched_to)}</b> — {String(result.calories)} kcal, {String(result.protein_g)}g protein.</div>;
   }
   return null;
@@ -51,17 +70,42 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [error, setError] = useState("");
+  const [today, setToday] = useState(localToday());
+  const [selectedDate, setSelectedDate] = useState(localToday());
+  const [chatDays, setChatDays] = useState<ChatDay[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
+  const selectedRef = useRef(selectedDate);
+  selectedRef.current = selectedDate;
+
+  const isToday = selectedDate === today;
+
+  const loadDays = useCallback(() => {
+    fetch(`${API}/api/chat/days`, { cache: "no-store" })
+      .then(r => r.json())
+      .then(data => {
+        if (data.today) setToday(data.today);
+        setChatDays(data.days || []);
+      })
+      .catch(() => {});
+  }, []);
+
+  const loadDay = useCallback((date: string) => {
+    setHistoryLoaded(false);
+    fetch(`${API}/api/chat/history?date=${date}`, { cache: "no-store" })
+      .then(r => r.json())
+      .then(data => { if (selectedRef.current === date) setMessages(data.messages || []); })
+      .catch(() => setError("Backend unavailable. Start FastAPI on port 8000."))
+      .finally(() => { if (selectedRef.current === date) setHistoryLoaded(true); });
+  }, []);
 
   useEffect(() => {
     fetch(`${API}/api/profile`).then(r => r.json()).then(setProfile).catch(() => {});
-    fetch(`${API}/api/chat/history`)
-      .then(r => r.json())
-      .then(data => setMessages(data.messages || []))
-      .catch(() => setError("Backend unavailable. Start FastAPI on port 8000."))
-      .finally(() => setHistoryLoaded(true));
-  }, []);
+    loadDays();
+  }, [loadDays]);
+
+  // Each day is its own chat page: switching the day loads only that day's messages.
+  useEffect(() => { loadDay(selectedDate); }, [selectedDate, loadDay]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
@@ -72,6 +116,7 @@ export default function ChatPage() {
     const clean = text.trim();
     if (!clean) return "";
     if (loadingRef.current) return "";
+    if (selectedRef.current !== today) return "";
     loadingRef.current = true;
     setError("");
     setMessages(current => [...current, { role: "user", content: clean }]);
@@ -85,6 +130,7 @@ export default function ChatPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "The coach could not reply.");
       setMessages(current => [...current, { role: "assistant", content: data.reply, tool_events: data.tool_events || [] }]);
+      loadDays();
       return data.reply as string;
     } catch (err) {
       setError(err instanceof Error ? err.message : "The coach is unavailable. Check your API key and backend.");
@@ -94,7 +140,7 @@ export default function ChatPage() {
       loadingRef.current = false;
       setLoading(false);
     }
-  }, []);
+  }, [today, loadDays]);
 
   const voice = useVoiceChat({ onUtterance: sendText });
 
@@ -107,10 +153,18 @@ export default function ChatPage() {
   }
 
   async function clearChat() {
-    if (!confirm("Clear this conversation? This can't be undone.")) return;
+    if (!confirm(`Clear ${dayLabel(selectedDate, today).toLowerCase()}'s conversation? This can't be undone.`)) return;
     voice.stop();
-    await fetch(`${API}/api/chat/history`, { method: "DELETE" }).catch(() => {});
+    await fetch(`${API}/api/chat/history?date=${selectedDate}`, { method: "DELETE" }).catch(() => {});
     setMessages([]);
+    loadDays();
+  }
+
+  function pickDay(date: string) {
+    if (date === selectedDate) return;
+    voice.stop();
+    setError("");
+    setSelectedDate(date);
   }
 
   const name = profile?.name || "there";
@@ -122,12 +176,28 @@ export default function ChatPage() {
       active="chat"
       crumb="Coach chat"
       className="chat-main"
-      actions={<button className="icon-btn" onClick={clearChat} aria-label="Clear conversation" title="Clear conversation"><Trash2 size={18} /></button>}
+      actions={<button className="icon-btn" onClick={clearChat} aria-label="Clear this day's conversation" title="Clear this day's conversation"><Trash2 size={18} /></button>}
     >
       <div className="chat-wrap">
         <div className="chat-intro">
           <h1>Chat about your food <span>✦</span></h1>
           <p className="subtitle">Type or tap the mic and just talk. Tell me what you ate, like &quot;I had 2 idli and chai&quot;, and I&apos;ll look it up, show you the numbers, and ask before logging anything.</p>
+        </div>
+
+        <div className="chat-days" role="tablist" aria-label="Chat days">
+          {(chatDays.some(d => d.date === today) ? chatDays : [{ date: today, messages: 0, preview: "" }, ...chatDays]).map(day => (
+            <button
+              key={day.date}
+              role="tab"
+              aria-selected={day.date === selectedDate}
+              className={`chat-day-chip ${day.date === selectedDate ? "active" : ""}`}
+              onClick={() => pickDay(day.date)}
+              title={day.preview || "No messages yet"}
+            >
+              <b>{dayLabel(day.date, today)}</b>
+              <span>{day.messages} msg{day.messages === 1 ? "" : "s"}</span>
+            </button>
+          ))}
         </div>
 
         <div className="chat-panel">
@@ -136,7 +206,9 @@ export default function ChatPage() {
             {historyLoaded && messages.length === 0 && (
               <div className="chat-empty">
                 <div className="coach-badge chat-empty-badge"><Sparkles size={20} /></div>
-                <p>No messages yet. Type, or tap the mic and say: <i>&quot;I had 1 idli and a cup of chai&quot;</i></p>
+                {isToday
+                  ? <p>No messages yet. Type, or tap the mic and say: <i>&quot;I had 1 idli and a cup of chai&quot;</i></p>
+                  : <p>No conversation on this day.</p>}
               </div>
             )}
             {messages.map((message, index) => (
@@ -168,7 +240,7 @@ export default function ChatPage() {
             </div>
           )}
 
-          {voice.active && (
+          {isToday && voice.active && (
             <div className={`voice-bar ${voice.phase}`} role="status" aria-live="polite">
               <button
                 className="voice-bar-main"
@@ -195,27 +267,36 @@ export default function ChatPage() {
             </div>
           )}
 
+          {!isToday && (
+            <div className="chat-readonly">
+              <span>This is {dayLabel(selectedDate, today)}&apos;s chat, read-only.</span>
+              <button className="primary-btn" onClick={() => pickDay(today)}><Plus size={15} /> Back to today&apos;s chat</button>
+            </div>
+          )}
+
+          {isToday && (
           <form className="chat-input-row" onSubmit={send}>
-            <button
-              type="button"
-              className={`mic-btn ${voice.active ? "on" : ""}`}
-              onClick={voice.active ? voice.stop : voice.start}
-              disabled={!voice.supported}
-              aria-label={micLabel}
-              aria-pressed={voice.active}
-              title={voice.supported ? micLabel : "Voice input works in Chrome, Edge or Safari"}
-            >
-              {voice.active ? <Square size={16} /> : <Mic size={18} />}
-            </button>
-            <input
-              autoFocus
-              value={input}
-              onChange={event => setInput(event.target.value)}
-              placeholder={voice.active ? "Voice mode is on. You can also type here…" : "e.g. I had 1 idli and a cup of chai..."}
-              disabled={loading}
-            />
-            <button className="primary-btn" disabled={loading || !input.trim()}><Send size={16} /> Send</button>
-          </form>
+              <button
+                type="button"
+                className={`mic-btn ${voice.active ? "on" : ""}`}
+                onClick={voice.active ? voice.stop : voice.start}
+                disabled={!voice.supported}
+                aria-label={micLabel}
+                aria-pressed={voice.active}
+                title={voice.supported ? micLabel : "Voice input works in Chrome, Edge or Safari"}
+              >
+                {voice.active ? <Square size={16} /> : <Mic size={18} />}
+              </button>
+              <input
+                autoFocus
+                value={input}
+                onChange={event => setInput(event.target.value)}
+                placeholder={voice.active ? "Voice mode is on. You can also type here…" : "e.g. I had 1 idli and a cup of chai..."}
+                disabled={loading}
+              />
+              <button className="primary-btn" disabled={loading || !input.trim()}><Send size={16} /> Send</button>
+            </form>
+          )}
         </div>
       </div>
     </Shell>

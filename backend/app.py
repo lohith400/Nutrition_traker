@@ -165,21 +165,31 @@ def get_food_preferences(limit: int = 10):
     return memory_agent.get_food_preferences(limit)
 
 
+@app.get("/api/chat/days")
+def chat_days():
+    """Days that have a coach conversation (one chat page per day)."""
+    return {"today": datetime.now().strftime("%Y-%m-%d"), "days": memory_agent.list_chat_days()}
+
+
 @app.get("/api/chat/history")
-def chat_history():
-    return {"messages": memory_agent.get_chat_history()}
+def chat_history(date: str | None = None):
+    """The conversation for one day (defaults to today)."""
+    day = date or datetime.now().strftime("%Y-%m-%d")
+    return {"date": day, "messages": memory_agent.get_chat_history(date=day)}
 
 
 @app.delete("/api/chat/history")
-def clear_chat_history():
-    return memory_agent.clear_chat_history()
+def clear_chat_history(date: str | None = None):
+    """Clear one day's conversation (defaults to today)."""
+    return memory_agent.clear_chat_history(date or datetime.now().strftime("%Y-%m-%d"))
 
 
 @app.post("/api/chat")
 def chat(payload: ChatRequest):
     if orchestrator.client is None:
         raise HTTPException(status_code=503, detail="AI coach is not configured. Create backend/.env and set OPENROUTER_API_KEY.")
-    history = memory_agent.get_chat_history()
+    # Only today's conversation is sent to the model: each day is its own chat.
+    history = memory_agent.get_chat_history(date=datetime.now().strftime("%Y-%m-%d"))
     memory_agent.save_chat_message("user", payload.message)
     try:
         result = orchestrator.chat_with_tools(payload.message, history)

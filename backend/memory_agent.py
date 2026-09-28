@@ -375,15 +375,29 @@ def save_chat_message(role: str, content: str, tool_events=None) -> dict:
     return {"status": "saved"}
 
 
-def get_chat_history(limit: int = 200) -> list:
+def _today() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def get_chat_history(limit: int = 500, date: str | None = None) -> list:
+    """Chat transcript, oldest first. With `date` (YYYY-MM-DD) only that day's
+    conversation is returned -- each day is its own chat page. Without it,
+    everything is returned (kept for backward compatibility)."""
     import json as _json
     conn = _get_conn()
     _ensure_chat_table(conn)
-    rows = conn.execute(
-        "SELECT role, content, tool_events, created_at FROM chat_messages "
-        "ORDER BY msg_id ASC LIMIT ?",
-        (limit,),
-    ).fetchall()
+    if date:
+        rows = conn.execute(
+            "SELECT role, content, tool_events, created_at FROM chat_messages "
+            "WHERE substr(created_at, 1, 10) = ? ORDER BY msg_id ASC LIMIT ?",
+            (date, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT role, content, tool_events, created_at FROM chat_messages "
+            "ORDER BY msg_id ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
     conn.close()
     out = []
     for r in rows:
@@ -393,10 +407,41 @@ def get_chat_history(limit: int = 200) -> list:
     return out
 
 
-def clear_chat_history() -> dict:
+def list_chat_days(days: int = 60) -> list:
+    """One entry per day that has a conversation (most recent first), with the
+    message count and a short preview of the first thing the user said. Today
+    is always included so the "Today" chat page is available even when empty."""
     conn = _get_conn()
     _ensure_chat_table(conn)
-    conn.execute("DELETE FROM chat_messages")
+    rows = conn.execute(
+        "SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS n FROM chat_messages "
+        "GROUP BY day ORDER BY day DESC LIMIT ?",
+        (days,),
+    ).fetchall()
+    result = []
+    for r in rows:
+        first = conn.execute(
+            "SELECT content FROM chat_messages WHERE substr(created_at, 1, 10) = ? AND role = 'user' "
+            "ORDER BY msg_id ASC LIMIT 1",
+            (r["day"],),
+        ).fetchone()
+        preview = (first["content"] if first else "")[:60]
+        result.append({"date": r["day"], "messages": r["n"], "preview": preview})
+    conn.close()
+    today = _today()
+    if not any(d["date"] == today for d in result):
+        result.insert(0, {"date": today, "messages": 0, "preview": ""})
+    return result
+
+
+def clear_chat_history(date: str | None = None) -> dict:
+    """Delete one day's conversation (`date`), or everything when omitted."""
+    conn = _get_conn()
+    _ensure_chat_table(conn)
+    if date:
+        conn.execute("DELETE FROM chat_messages WHERE substr(created_at, 1, 10) = ?", (date,))
+    else:
+        conn.execute("DELETE FROM chat_messages")
     conn.commit()
     conn.close()
     return {"status": "cleared"}
