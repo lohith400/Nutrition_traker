@@ -1,14 +1,37 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Mic, Plus, Search, Send, Sparkles, Square, Trash2, Volume2, VolumeX } from "lucide-react";
+import { AlertTriangle, Camera, CheckCircle2, ExternalLink, MapPin, Mic, Plus, Search, Send, Sparkles, Square, Star, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import Shell, { API } from "../components/Shell";
 import { useVoiceChat } from "../hooks/useVoiceChat";
 
 type ToolEvent = { tool: string; args: Record<string, unknown>; result: Record<string, unknown> };
-type ChatMsg = { role: "user" | "assistant"; content: string; tool_events?: ToolEvent[]; created_at?: string; pending?: boolean };
+type ChatMsg = { role: "user" | "assistant"; content: string; tool_events?: ToolEvent[]; created_at?: string; pending?: boolean; image?: string };
 type Profile = { name?: string };
 type ChatDay = { date: string; messages: number; preview: string };
+
+/** Shrinks a photo to max 1024px and re-encodes as JPEG so uploads stay small and fast. */
+function fileToDataUrl(file: File, maxSide = 1024, quality = 0.82): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { URL.revokeObjectURL(url); reject(new Error("Could not read this image.")); return; }
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Could not read this image. Try a JPG or PNG photo.")); };
+    img.src = url;
+  });
+}
 
 function localToday(): string {
   const d = new Date();
@@ -27,8 +50,64 @@ function dayLabel(iso: string, today: string): string {
 
 const PHASE_LABEL = { idle: "", listening: "Listening… speak now", thinking: "Coach is thinking…", speaking: "Coach is speaking… tap to interrupt" } as const;
 
+type Coords = { lat: number; lng: number };
+const LOC_KEY = "nutrisync_location";
+const NEARBY_INTENT = /\b(near(by| me)?|around me|close by|restaurants?|hotels?|places? to eat|eat out|cafes?|dine|dining)\b/i;
+
+function getPosition(): Promise<Coords | null> {
+  return new Promise(resolve => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) { resolve(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 10 * 60 * 1000 },
+    );
+  });
+}
+
+type Restaurant = {
+  name: string; type?: string | null; address?: string | null; rating?: number | null; rating_count?: number;
+  price?: string | null; open_now?: boolean | null; hours?: string | null; distance_m?: number | null; likely_pure_veg?: boolean;
+  serves_vegetarian?: boolean | null; summary?: string | null; maps_url?: string | null; website?: string | null;
+};
+
+function RestaurantCard({ r }: { r: Restaurant }) {
+  const dist = r.distance_m == null ? "" : r.distance_m < 1000 ? `${r.distance_m} m` : `${(r.distance_m / 1000).toFixed(1)} km`;
+  return (
+    <div className="resto-card">
+      <div className="resto-head">
+        <b>{r.name}</b>
+        {r.likely_pure_veg ? <span className="resto-tag veg">Veg</span> : r.serves_vegetarian ? <span className="resto-tag">Veg options</span> : null}
+      </div>
+      <div className="resto-meta">
+        {r.rating != null && <span><Star size={12} /> {r.rating}{r.rating_count ? ` (${r.rating_count})` : ""}</span>}
+        {r.price && <span>{r.price}</span>}
+        {dist && <span>{dist}</span>}
+        {r.open_now != null && <span className={r.open_now ? "open" : "closed"}>{r.open_now ? "Open now" : "Closed now"}</span>}
+      </div>
+      {r.type && <div className="resto-sub">{r.type}</div>}
+      {r.address && <div className="resto-sub">{r.address}</div>}
+      {r.hours && <div className="resto-sub">Hours: {r.hours}</div>}
+      {r.summary && <div className="resto-sub">{r.summary}</div>}
+      <div className="resto-links">
+        {r.maps_url && <a href={r.maps_url} target="_blank" rel="noopener noreferrer"><MapPin size={12} /> Maps &amp; menu</a>}
+        {r.website && <a href={r.website} target="_blank" rel="noopener noreferrer"><ExternalLink size={12} /> Website</a>}
+      </div>
+    </div>
+  );
+}
+
 function ToolCard({ event }: { event: ToolEvent }) {
   const { tool, result } = event;
+  if (tool === "find_restaurants") {
+    if (result.status === "ok" && Array.isArray(result.restaurants)) {
+      return <div className="resto-stack">{(result.restaurants as Restaurant[]).map((r, i) => <RestaurantCard r={r} key={i} />)}</div>;
+    }
+    if (result.status === "need_location") {
+      return <div className="tool-card tool-card-warn"><MapPin size={14} /> Location needed — tap the pin next to the message box, or tell me your area.</div>;
+    }
+    return <div className="tool-card tool-card-warn"><AlertTriangle size={14} /> {String(result.error || result.message || "Restaurant search failed.")}</div>;
+  }
   if (tool === "lookup_food") {
     if (result.status === "not_found") {
       return <div className="tool-card tool-card-warn"><Search size={14} /> Couldn&apos;t find &quot;{String(result.item)}&quot; in the food database.</div>;
@@ -73,6 +152,11 @@ export default function ChatPage() {
   const [today, setToday] = useState(localToday());
   const [selectedDate, setSelectedDate] = useState(localToday());
   const [chatDays, setChatDays] = useState<ChatDay[]>([]);
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [coords, setCoords] = useState<Coords | null>(null);
+  const coordsRef = useRef<Coords | null>(null);
+  coordsRef.current = coords;
+  const fileRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
   const selectedRef = useRef(selectedDate);
@@ -100,6 +184,10 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LOC_KEY);
+      if (saved) setCoords(JSON.parse(saved));
+    } catch { /* ignore */ }
     fetch(`${API}/api/profile`).then(r => r.json()).then(setProfile).catch(() => {});
     loadDays();
   }, [loadDays]);
@@ -112,20 +200,29 @@ export default function ChatPage() {
   }, [messages, loading]);
 
   /** Sends one message to the coach. Returns the reply text, "" if busy, or null on failure. */
-  const sendText = useCallback(async (text: string): Promise<string | null> => {
+  const sendText = useCallback(async (text: string, image?: string | null): Promise<string | null> => {
     const clean = text.trim();
-    if (!clean) return "";
+    if (!clean && !image) return "";
     if (loadingRef.current) return "";
     if (selectedRef.current !== today) return "";
     loadingRef.current = true;
     setError("");
-    setMessages(current => [...current, { role: "user", content: clean }]);
+    setMessages(current => [...current, { role: "user", content: clean || "📷 Meal photo", image: image || undefined }]);
     setLoading(true);
     try {
+      // "restaurants near me": ask the browser for the location once, then remember it on this device.
+      let where = coordsRef.current;
+      if (!where && NEARBY_INTENT.test(clean)) {
+        where = await getPosition();
+        if (where) {
+          setCoords(where);
+          try { localStorage.setItem(LOC_KEY, JSON.stringify(where)); } catch { /* ignore */ }
+        }
+      }
       const response = await fetch(`${API}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: clean }),
+        body: JSON.stringify({ message: clean, image: image || null, location: where }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "The coach could not reply.");
@@ -147,9 +244,37 @@ export default function ChatPage() {
   async function send(event: FormEvent) {
     event.preventDefault();
     const text = input.trim();
-    if (!text || loading) return;
+    if ((!text && !pendingImage) || loading) return;
+    const image = pendingImage;
     setInput("");
-    await sendText(text);
+    setPendingImage(null);
+    await sendText(text, image);
+  }
+
+  async function toggleLocation() {
+    if (coords) {
+      setCoords(null);
+      try { localStorage.removeItem(LOC_KEY); } catch { /* ignore */ }
+      return;
+    }
+    const where = await getPosition();
+    if (!where) { setError("Couldn't get your location. Allow location access in the browser, or just tell me your area."); return; }
+    setError("");
+    setCoords(where);
+    try { localStorage.setItem(LOC_KEY, JSON.stringify(where)); } catch { /* ignore */ }
+  }
+
+  async function onPickPhoto(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setError("Please choose an image file."); return; }
+    try {
+      setError("");
+      setPendingImage(await fileToDataUrl(file));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read this image.");
+    }
   }
 
   async function clearChat() {
@@ -181,7 +306,7 @@ export default function ChatPage() {
       <div className="chat-wrap">
         <div className="chat-intro">
           <h1>Chat about your food <span>✦</span></h1>
-          <p className="subtitle">Type or tap the mic and just talk. Tell me what you ate, like &quot;I had 2 idli and chai&quot;, and I&apos;ll look it up, show you the numbers, and ask before logging anything.</p>
+          <p className="subtitle">Type, tap the mic, snap a photo of your meal, or ask for restaurants near you. Tell me what you ate, like &quot;I had 2 idli and chai&quot;, and I&apos;ll look it up, show you the numbers, and ask before logging anything.</p>
         </div>
 
         <div className="chat-days" role="tablist" aria-label="Chat days">
@@ -215,7 +340,10 @@ export default function ChatPage() {
               <div className={`chat-row ${message.role}`} key={index}>
                 <div className="chat-avatar">{message.role === "user" ? initial : <Sparkles size={14} />}</div>
                 <div className="chat-bubble-col">
-                  <div className={`chat-bubble ${message.role}`}>{message.content}</div>
+                  <div className={`chat-bubble ${message.role}`}>
+                    {message.image && <img className="chat-photo" src={message.image} alt="Meal photo you sent" />}
+                    {message.content}
+                  </div>
                   {message.tool_events && message.tool_events.length > 0 && (
                     <div className="tool-card-stack">
                       {message.tool_events.map((event, eventIndex) => <ToolCard event={event} key={eventIndex} />)}
@@ -274,6 +402,14 @@ export default function ChatPage() {
             </div>
           )}
 
+          {isToday && pendingImage && (
+            <div className="photo-preview">
+              <img src={pendingImage} alt="Photo ready to send" />
+              <span>Photo ready — press Send and I&apos;ll identify the meal.</span>
+              <button type="button" onClick={() => setPendingImage(null)} aria-label="Remove photo"><X size={16} /></button>
+            </div>
+          )}
+
           {isToday && (
           <form className="chat-input-row" onSubmit={send}>
               <button
@@ -287,14 +423,35 @@ export default function ChatPage() {
               >
                 {voice.active ? <Square size={16} /> : <Mic size={18} />}
               </button>
+              <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickPhoto} />
+              <button
+                type="button"
+                className={`mic-btn photo-btn ${pendingImage ? "on" : ""}`}
+                onClick={() => fileRef.current?.click()}
+                disabled={loading}
+                aria-label="Upload or take a meal photo"
+                title="Upload or take a meal photo"
+              >
+                <Camera size={18} />
+              </button>
+              <button
+                type="button"
+                className={`mic-btn loc-btn ${coords ? "on" : ""}`}
+                onClick={toggleLocation}
+                aria-pressed={!!coords}
+                aria-label={coords ? "Location on. Tap to turn off" : "Share my location for nearby restaurants"}
+                title={coords ? "Location shared for nearby restaurants (tap to turn off)" : "Share my location for nearby restaurants"}
+              >
+                <MapPin size={18} />
+              </button>
               <input
                 autoFocus
                 value={input}
                 onChange={event => setInput(event.target.value)}
-                placeholder={voice.active ? "Voice mode is on. You can also type here…" : "e.g. I had 1 idli and a cup of chai..."}
+                placeholder={pendingImage ? "Add a note about the photo (optional)…" : voice.active ? "Voice mode is on. You can also type here…" : "e.g. I had 1 idli and a cup of chai..."}
                 disabled={loading}
               />
-              <button className="primary-btn" disabled={loading || !input.trim()}><Send size={16} /> Send</button>
+              <button className="primary-btn" disabled={loading || (!input.trim() && !pendingImage)}><Send size={16} /> Send</button>
             </form>
           )}
         </div>

@@ -13,9 +13,9 @@ from datetime import datetime
 from openai import OpenAI
 
 try:
-    from backend import math_engine, memory_agent, menu_planner, rag_resolver
+    from backend import math_engine, memory_agent, menu_planner, places_finder, rag_resolver
 except ImportError:
-    import math_engine, memory_agent, menu_planner, rag_resolver
+    import math_engine, memory_agent, menu_planner, places_finder, rag_resolver
 
 MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -223,7 +223,56 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_restaurants",
+            "description": (
+                "Find real restaurants/hotels near the user (OpenStreetMap, or Google Places if configured). Call this whenever the user asks "
+                "for restaurants, hotels, places to eat, or veg / non-veg / pure-veg options near them. Set "
+                "diet_filter='veg' for veg or pure-veg requests, 'non_veg' for non-veg requests, otherwise 'any'. "
+                "Put a dish or cuisine in `query` if they mention one (e.g. 'biryani', 'dosa'). If the user named "
+                "an area or city, pass it in `area`; otherwise the app uses their shared GPS location. "
+                "Menus are NOT available -- never invent a restaurant's menu, ratings or prices."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "diet_filter": {"type": "string", "enum": ["veg", "non_veg", "any"]},
+                    "query": {"type": "string", "description": "Optional dish or cuisine, e.g. 'biryani'."},
+                    "area": {"type": "string", "description": "Optional area/city the user named, e.g. 'Indiranagar, Bengaluru'."},
+                },
+                "required": ["diet_filter"],
+            },
+        },
+    },
 ]
+
+
+def _tool_find_restaurants(args, location=None):
+    diet_filter = args.get("diet_filter") or "any"
+    area = (args.get("area") or "").strip()
+    lat = lng = None
+    if location and location.get("lat") is not None and location.get("lng") is not None:
+        lat, lng = float(location["lat"]), float(location["lng"])
+    if not area and lat is None:
+        return {"status": "need_location",
+                "message": "I don't have the user's location. Ask them to tap the location pin next to the message box and allow location access, or tell you their area/city."}
+    result = places_finder.search_restaurants(args.get("query") or "", diet_filter, area, lat, lng)
+    if result.get("status") != "ok":
+        return result
+    # Google has no menu data. Offer dish ideas that come from the NutriSync food database,
+    # sized to what is left in today's budget, so the user has something to order.
+    try:
+        budget = math_engine.get_remaining_budget_today(datetime.now().strftime("%Y-%m-%d"))
+        diet = "vegetarian" if diet_filter == "veg" else memory_agent.get_user_diet()
+        if "error" not in budget:
+            ideas = menu_planner.suggest_next_meal(budget["remaining_protein_g"], budget["remaining_calories"], diet, None)
+            result["dish_ideas_from_database"] = ideas.get("options", [])
+    except Exception:
+        pass
+    result["menu_note"] = "No menu data is available. Point the user to maps_url / website for the real menu."
+    return result
 
 
 def _tool_lookup_food(item_name, quantity=1, unit="serving"):
@@ -260,7 +309,8 @@ TOOL_IMPL = {
 MAX_TOOL_ROUNDS = 5
 
 
-def chat_with_tools(user_message: str, history: list | None = None) -> dict:
+def chat_with_tools(user_message: str, history: list | None = None, image: str | None = None,
+                    location: dict | None = None) -> dict:
     """Runs a bounded tool-calling loop against OpenRouter.
 
     `history` is the prior turns as stored by memory_agent.get_chat_history()
@@ -292,6 +342,15 @@ def chat_with_tools(user_message: str, history: list | None = None) -> dict:
         "If the user confirms ('yes', 'log it', 'add it') you MUST call log_food -- do not just reply that it is done. "
         "If log_food fails, tell the user it was NOT logged and why. Never recite today's totals from memory: "
         "use the 'today_totals' returned by log_food or the meals in the live context below.\n"
+        "RESTAURANTS: when the user asks for restaurants/hotels/places to eat near them (veg, non-veg, pure veg), "
+        "call find_restaurants -- never name restaurants from your own knowledge. Present at most 4-5 results "
+        "briefly (name, distance, cuisine, and rating/price/hours only if the result has them -- never invent a rating). Use diet_filter 'veg' for veg/pure-veg, 'non_veg' for "
+        "non-veg. Note that 'pure veg' can't be fully verified -- only what the map data says. "
+        "No menus are available: never invent a restaurant's dishes or prices. Instead say ratings, photos and the real menu are behind the "
+        "Maps link (and website if given), and offer 'what to order' ideas ONLY from dish_ideas_from_database (or suggest_meal), "
+        "clearly saying these are ideas that fit their remaining budget, not confirmed items on that restaurant's menu. "
+        "If find_restaurants returns need_location, ask them to tap the location pin or tell you their area. "
+        "If it returns not_configured or error, tell them plainly what is wrong.\n"
         "If lookup_food returns not_found, say so plainly, don't invent numbers, and ask them to rephrase "
         "or try a simpler/more common name. If it returns diet_mismatch, tell them that food doesn't fit "
         "their diet and ask if they'd like an alternative.\n"
@@ -317,7 +376,23 @@ def chat_with_tools(user_message: str, history: list | None = None) -> dict:
             if turn["role"] == "assistant" and _claims_logged(content) and not _log_succeeded(turn.get("tool_events") or []):
                 content += "\n\n[System note: nothing was actually saved to the food log in this message.]"
             messages.append({"role": turn["role"], "content": content})
-    messages.append({"role": "user", "content": user_message})
+    if image:
+        prompt = user_message or "What meal is this? Look it up and tell me the nutrition."
+        prompt = (
+            "[The user attached a photo of their meal.] " + prompt + "\n"
+            "Identify every distinct food/dish you can see, using common Indian names where they apply. "
+            "For EACH one call lookup_food with your best estimate of how many standard servings are visible "
+            "(e.g. 2 idlis -> quantity 2, unit 'serving'). Then show what was found, say plainly that portion size "
+            "is estimated from the photo, and ask whether to log it (and as which meal) or whether the amount "
+            "should be corrected. Do NOT call log_food until the user confirms. If you cannot tell what the food "
+            "is, say so and ask them to type its name."
+        )
+        messages.append({"role": "user", "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": image}},
+        ]})
+    else:
+        messages.append({"role": "user", "content": user_message})
 
     tool_events = []
     nudged = False
@@ -364,7 +439,10 @@ def chat_with_tools(user_message: str, history: list | None = None) -> dict:
             except json.JSONDecodeError:
                 args = {}
             impl = TOOL_IMPL.get(name)
-            result = impl(args) if impl else {"error": f"unknown tool '{name}'"}
+            if name == "find_restaurants":
+                result = _tool_find_restaurants(args, location)
+            else:
+                result = impl(args) if impl else {"error": f"unknown tool '{name}'"}
             tool_events.append({"tool": name, "args": args, "result": result})
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, default=str)})
 

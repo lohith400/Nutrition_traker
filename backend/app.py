@@ -51,7 +51,11 @@ class FoodLogRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=4000)
+    message: str = Field(default="", max_length=4000)
+    # Optional meal photo as a data URL (data:image/jpeg;base64,...), resized by the frontend.
+    image: str | None = Field(default=None, max_length=8_000_000)
+    # Optional device location, used only by the restaurant finder.
+    location: dict | None = None
 
 
 class WaterLogRequest(BaseModel):
@@ -190,9 +194,18 @@ def chat(payload: ChatRequest):
         raise HTTPException(status_code=503, detail="AI coach is not configured. Create backend/.env and set OPENROUTER_API_KEY.")
     # Only today's conversation is sent to the model: each day is its own chat.
     history = memory_agent.get_chat_history(date=datetime.now().strftime("%Y-%m-%d"))
-    memory_agent.save_chat_message("user", payload.message)
+    text = (payload.message or "").strip()
+    image = payload.image
+    if image and not image.startswith(("data:image/jpeg;base64,", "data:image/png;base64,", "data:image/webp;base64,")):
+        raise HTTPException(status_code=422, detail="Unsupported image. Please upload a JPG, PNG or WebP photo.")
+    if not text and not image:
+        raise HTTPException(status_code=422, detail="Send a message or a meal photo.")
+    # The photo itself is not stored in chat history (keeps the database small);
+    # a marker is saved so the transcript still shows a photo was sent.
+    saved = f"📷 [Meal photo] {text}".strip() if image else text
+    memory_agent.save_chat_message("user", saved)
     try:
-        result = orchestrator.chat_with_tools(payload.message, history)
+        result = orchestrator.chat_with_tools(text, history, image=image, location=payload.location)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Coach provider error: {exc}") from exc
     memory_agent.save_chat_message("assistant", result["reply"], result.get("tool_events"))
