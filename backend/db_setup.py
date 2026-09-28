@@ -15,8 +15,17 @@ import sqlite3
 import openpyxl
 import os
 
-DB_PATH = os.getenv("NUTRISYNC_DB_PATH", os.path.join(os.path.dirname(__file__), "nutrisync.db"))
-EXCEL_PATH = os.path.join(os.path.dirname(__file__), "data", "anuvaad.xlsx")
+_DEFAULT_DB = (
+    os.path.join(os.path.dirname(__file__), "..", "nutrisync.db")
+    if os.path.exists(os.path.join(os.path.dirname(__file__), "..", "nutrisync.db"))
+    else os.path.join(os.path.dirname(__file__), "nutrisync.db")
+)
+DB_PATH = os.getenv("NUTRISYNC_DB_PATH", _DEFAULT_DB)
+EXCEL_PATH = (
+    os.path.join(os.path.dirname(__file__), "data", "anuvaad.xlsx")
+    if os.path.exists(os.path.join(os.path.dirname(__file__), "data", "anuvaad.xlsx"))
+    else os.path.join(os.path.dirname(__file__), "..", "data", "anuvaad.xlsx")
+)
 
 
 def build_database():

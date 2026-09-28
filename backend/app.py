@@ -9,16 +9,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(ROOT / "backend" / ".env")
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+DIR = Path(__file__).resolve().parent
+ROOT = DIR.parent
+load_dotenv(DIR / ".env")
+load_dotenv(ROOT / ".env")
+for p in (DIR, ROOT):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
 
-import math_engine  # noqa: E402
-import memory_agent  # noqa: E402
-import menu_planner  # noqa: E402
-import orchestrator  # noqa: E402
-import rag_resolver  # noqa: E402
+try:
+    from backend import math_engine, memory_agent, menu_planner, orchestrator, rag_resolver  # noqa: E402
+except ImportError:
+    import math_engine, memory_agent, menu_planner, orchestrator, rag_resolver  # noqa: E402
 
 app = FastAPI(title="NutriSync API", version="0.3.0")
 origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if x.strip()]

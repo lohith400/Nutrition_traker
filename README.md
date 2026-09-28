@@ -6,22 +6,25 @@ NutriSync is a nutrition coach for Indian food. It combines deterministic nutrit
 
 ```text
 .
-├── backend/              FastAPI API adapter
-│   ├── app.py
-│   ├── requirements.txt
-│   └── .env.example
+├── backend/              FastAPI API & Core Nutrition Engine
+│   ├── app.py            FastAPI API server
+│   ├── math_engine.py    Deterministic BMR, macro, and calorie logic
+│   ├── memory_agent.py   Profile, meal, and pattern persistence
+│   ├── rag_resolver.py   Food-name matching & normalization
+│   ├── menu_planner.py   Meal recommendation engine
+│   ├── orchestrator.py   AI coach service with tool-calling
+│   ├── db_setup.py       Database builder
+│   ├── data/             Indian food source data (anuvaad.xlsx)
+│   ├── requirements.txt  Backend dependencies
+│   └── .env.example      Environment configuration template
 ├── frontend/             Next.js + TypeScript dashboard
-│   ├── app/
-│   ├── package.json
-│   └── .env.example
-├── data/                 Indian food source data
-├── db_setup.py           Database builder
-├── math_engine.py        Deterministic BMR, macro, and calorie logic
-├── memory_agent.py       Profile, meal, and pattern persistence
-├── rag_resolver.py       Food-name matching
-├── menu_planner.py       Meal suggestions
-├── orchestrator.py       Optional AI coach service
-└── nutrisync.db          SQLite database
+│   ├── app/              Next.js app router pages & styles
+│   ├── package.json      Frontend dependencies
+│   └── .env.example      Frontend environment template
+├── docker/               Docker entrypoint scripts
+├── docs/                 Deployment and architecture guides
+├── tests/                API smoke tests
+└── nutrisync.db          Local SQLite database (gitignored)
 ```
 
 ## Docker
@@ -39,7 +42,7 @@ For full production deployment, GitHub Actions CI/CD, volume backup/restore, and
 
 ## Run in GitHub Codespaces or Linux/macOS
 
-First-time setup: The database is not committed to the repository and must be built once after cloning by running `python db_setup.py` from the repository root.
+First-time setup: The database is not committed to the repository and must be built once after cloning by running `python backend/db_setup.py` from the repository root.
 
 Use two terminals. Do not commit `.env`, `.env.local`, `.venv`, `node_modules`, or `.next`.
 
@@ -52,8 +55,8 @@ source backend/.venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r backend/requirements.txt
 cp backend/.env.example backend/.env
-# Creates nutrisync.db from data/anuvaad.xlsx
-python db_setup.py
+# Creates nutrisync.db from backend/data/anuvaad.xlsx
+python backend/db_setup.py
 ```
 
 Edit `backend/.env` if you want coach chat:
@@ -113,7 +116,7 @@ py -m venv backend\.venv
 backend\.venv\Scripts\Activate.ps1
 pip install -r backend\requirements.txt
 Copy-Item backend\.env.example backend\.env
-python db_setup.py
+python backend\db_setup.py
 
 cd frontend
 Copy-Item .env.example .env.local
@@ -143,7 +146,7 @@ python -m uvicorn backend.app:app --reload --host 127.0.0.1 --port 8000
 
 ## Database warning
 
-nutrisync.db is not committed (it is gitignored), so run `python db_setup.py` once after cloning; re-running it drops and recreates the application tables and deletes stored profile and meal data, so do not run it again on a database you want to keep.
+nutrisync.db is not committed (it is gitignored), so run `python backend/db_setup.py` once after cloning; re-running it drops and recreates the application tables and deletes stored profile and meal data, so do not run it again on a database you want to keep.
 
 ## Security
 

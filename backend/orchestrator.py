@@ -9,10 +9,10 @@ from datetime import datetime
 
 from openai import OpenAI
 
-import math_engine
-import memory_agent
-import menu_planner
-import rag_resolver
+try:
+    from backend import math_engine, memory_agent, menu_planner, rag_resolver
+except ImportError:
+    import math_engine, memory_agent, menu_planner, rag_resolver
 
 MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 API_KEY = os.getenv("OPENROUTER_API_KEY")

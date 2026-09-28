@@ -9,13 +9,6 @@ services:
   backend:
     volumes:
       - ./backend:/app/backend
-      - ./data:/app/data
-      - ./db_setup.py:/app/db_setup.py
-      - ./math_engine.py:/app/math_engine.py
-      - ./memory_agent.py:/app/memory_agent.py
-      - ./menu_planner.py:/app/menu_planner.py
-      - ./orchestrator.py:/app/orchestrator.py
-      - ./rag_resolver.py:/app/rag_resolver.py
     command: ["python", "-m", "uvicorn", "backend.app:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
 
   frontend:

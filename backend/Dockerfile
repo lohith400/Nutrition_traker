@@ -41,14 +41,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000 \
     NUTRISYNC_DB_PATH=/data/nutrisync.db \
     PATH="/install/bin:${PATH}" \
-    PYTHONPATH="/install/lib/python3.12/site-packages:/app"
+    PYTHONPATH="/install/lib/python3.12/site-packages:/app:/app/backend"
 
 WORKDIR /app
 
 # Create non-root user and prepare directories
 RUN groupadd -g 10001 nutrisync \
     && useradd -u 10001 -g nutrisync -s /bin/sh -m -d /home/nutrisync nutrisync \
-    && mkdir -p /data /app/backend /app/data \
+    && mkdir -p /data /app/backend \
     && chown -R nutrisync:nutrisync /data /app /home/nutrisync
 
 # Copy installed dependencies from builder
@@ -56,8 +56,6 @@ COPY --from=builder /install /install
 
 # Copy required application modules only (never copy .env, tests, frontend, .git)
 COPY --chown=nutrisync:nutrisync backend/ /app/backend/
-COPY --chown=nutrisync:nutrisync db_setup.py math_engine.py memory_agent.py menu_planner.py orchestrator.py rag_resolver.py /app/
-COPY --chown=nutrisync:nutrisync data/anuvaad.xlsx /app/data/
 COPY --chown=nutrisync:nutrisync docker/backend-entrypoint.sh /app/entrypoint.sh
 
 RUN chmod +x /app/entrypoint.sh

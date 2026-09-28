@@ -10,7 +10,12 @@ whatever's short -- not generic advice.
 import sqlite3
 import os
 
-DB_PATH = os.getenv("NUTRISYNC_DB_PATH", os.path.join(os.path.dirname(__file__), "nutrisync.db"))
+_DEFAULT_DB = (
+    os.path.join(os.path.dirname(__file__), "..", "nutrisync.db")
+    if os.path.exists(os.path.join(os.path.dirname(__file__), "..", "nutrisync.db"))
+    else os.path.join(os.path.dirname(__file__), "nutrisync.db")
+)
+DB_PATH = os.getenv("NUTRISYNC_DB_PATH", _DEFAULT_DB)
 
 
 def _get_conn():

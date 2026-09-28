@@ -8,8 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+BACKEND_DIR = ROOT / "backend"
+for p in (BACKEND_DIR, ROOT):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
 
 
 @pytest.fixture(scope="session")
@@ -24,16 +26,12 @@ def test_client():
     os.environ["NUTRISYNC_DB_PATH"] = tmp_db_path
 
     # Set up DB tables from anuvaad.xlsx
-    import db_setup
+    from backend import db_setup
     db_setup.DB_PATH = tmp_db_path
     db_setup.build_database()
 
-    # Re-bind DB_PATH on all root modules
-    import math_engine
-    import memory_agent
-    import menu_planner
-    import rag_resolver
-    import orchestrator
+    # Re-bind DB_PATH on all backend modules
+    from backend import math_engine, memory_agent, menu_planner, orchestrator, rag_resolver
     from backend.app import app
 
     math_engine.DB_PATH = tmp_db_path
@@ -119,7 +117,7 @@ def test_log_unknown_food_returns_404(test_client):
 
 
 def test_chat_without_api_key_returns_503(test_client):
-    import orchestrator
+    from backend import orchestrator
     orchestrator.client = None
     res = test_client.post("/api/chat", json={"message": "Hello coach"})
     assert res.status_code == 503
