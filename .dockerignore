@@ -1,0 +1,58 @@
+# Version control & CI
+.git
+.github
+
+# Virtual environments
+venv/
+.venv/
+backend/venv/
+backend/.venv/
+**/venv/
+**/.venv/
+
+# Python cache & compiled files
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node & Next.js build artifacts
+node_modules/
+**/node_modules/
+.next/
+frontend/.next/
+out/
+.turbo/
+
+# Environment variables & secrets (NEVER bake secrets into images)
+.env
+.env.*
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+# Allow example files
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+nutrisync.db
+
+# Documentation & tests (not needed in runtime image)
+tests/
+docs/
+*.md
+
+# Editor & OS artifacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,49 @@
+# Production Docker Compose stack using pre-built images from GHCR
+# Run on production server with:
+#   IMAGE_TAG=v1.0.0 docker compose -f docker-compose.prod.yml up -d
+
+services:
+  backend:
+    image: ghcr.io/${REGISTRY_OWNER:-lohith400}/nutrisync-backend:${IMAGE_TAG:-latest}
+    container_name: nutrisync-backend-prod
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - NUTRISYNC_DB_PATH=/data/nutrisync.db
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - nutrisync_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').getcode() == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  frontend:
+    image: ghcr.io/${REGISTRY_OWNER:-lohith400}/nutrisync-frontend:${IMAGE_TAG:-latest}
+    container_name: nutrisync-frontend-prod
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ > /dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  nutrisync_data:
+    name: nutrisync_prod_data

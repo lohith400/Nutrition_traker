@@ -1,0 +1,57 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: nutrisync-backend:local
+    container_name: nutrisync-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - NUTRISYNC_DB_PATH=/data/nutrisync.db
+      - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+    env_file:
+      - path: backend/.env
+        required: false
+    volumes:
+      - nutrisync_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').getcode() == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # IMPORTANT: The user's browser runs on the host machine, NOT inside the Docker
+        # bridge network. Because Next.js client components make requests directly from the
+        # browser, NEXT_PUBLIC_API_URL must be an address reachable from the host
+        # (e.g., http://localhost:8000), rather than internal Docker DNS (http://backend:8000).
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    image: nutrisync-frontend:local
+    container_name: nutrisync-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  nutrisync_data:
+    name: nutrisync_data

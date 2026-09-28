@@ -1,0 +1,3 @@
+# .trivyignore: Add CVE identifiers or rule IDs to ignore during security scans
+# Example:
+# CVE-2023-12345

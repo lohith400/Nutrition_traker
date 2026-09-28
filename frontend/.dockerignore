@@ -1,0 +1,26 @@
+# Version control & CI
+.git
+.github
+
+# Node & Next.js local artifacts
+node_modules/
+.next/
+out/
+.turbo/
+npm-debug.log*
+
+# Environment files & secrets
+.env
+.env.*
+!.env.example
+
+# Test & Docs
+tests/
+docs/
+*.md
+
+# Editor & OS artifacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

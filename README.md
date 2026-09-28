@@ -24,6 +24,19 @@ NutriSync is a nutrition coach for Indian food. It combines deterministic nutrit
 └── nutrisync.db          SQLite database
 ```
 
+## Docker
+
+Run the entire NutriSync stack with Docker Compose:
+
+```bash
+docker compose up -d --build
+```
+
+- Backend API: `http://localhost:8000/health`
+- Frontend Dashboard: `http://localhost:3000`
+
+For full production deployment, GitHub Actions CI/CD, volume backup/restore, and scaling details, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Run in GitHub Codespaces or Linux/macOS
 
 First-time setup: The database is not committed to the repository and must be built once after cloning by running `python db_setup.py` from the repository root.

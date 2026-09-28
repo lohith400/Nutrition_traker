@@ -1,0 +1,179 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend Lint & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -r requirements-dev.txt
+
+      - name: Lint with ruff
+        run: ruff check .
+
+      - name: Run pytest smoke tests
+        run: pytest -v tests/test_smoke.py
+
+  frontend:
+    name: Frontend Typecheck & Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck TypeScript
+        run: npx tsc --noEmit
+
+      - name: Build Next.js application
+        env:
+          NEXT_PUBLIC_API_URL: "http://localhost:8000"
+        run: npm run build
+
+  docker:
+    name: Docker Build & Compose Integration
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: false
+          tags: nutrisync-backend:local
+          load: true
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: frontend/Dockerfile
+          build-args: |
+            NEXT_PUBLIC_API_URL=http://localhost:8000
+          push: false
+          tags: nutrisync-frontend:local
+          load: true
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Start Docker Compose stack
+        run: |
+          docker compose up -d
+
+      - name: Wait for services to become healthy
+        timeout-minutes: 3
+        run: |
+          echo "Waiting for backend healthy..."
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format='{{json .State.Health.Status}}' nutrisync-backend || true)
+            if [ "$status" = "\"healthy\"" ]; then
+              echo "Backend is healthy!"
+              break
+            fi
+            echo "Backend status: $status (waiting 3s)..."
+            sleep 3
+          done
+
+          echo "Waiting for frontend healthy..."
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format='{{json .State.Health.Status}}' nutrisync-frontend || true)
+            if [ "$status" = "\"healthy\"" ]; then
+              echo "Frontend is healthy!"
+              break
+            fi
+            echo "Frontend status: $status (waiting 3s)..."
+            sleep 3
+          done
+
+      - name: Test endpoints
+        run: |
+          echo "Testing backend /health..."
+          backend_res=$(curl -fsS http://localhost:8000/health)
+          echo "Backend response: $backend_res"
+          echo "$backend_res" | grep -q '"status":"ok"'
+
+          echo "Testing frontend root /..."
+          curl -fsS -I http://localhost:3000/ | grep -E "200 OK|HTTP/1.1 200"
+
+      - name: Print service logs on failure
+        if: failure()
+        run: |
+          docker compose logs
+
+      - name: Tear down Docker Compose
+        if: always()
+        run: |
+          docker compose down -v
+
+  security:
+    name: Security & Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks Secret Scanner
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Run Trivy Vulnerability Scanner (Repository Filesystem)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: "fs"
+          ignore-unfixed: true
+          format: "table"
+          severity: "CRITICAL,HIGH"
+          trivyignores: ".trivyignore"
+          exit-code: "0"

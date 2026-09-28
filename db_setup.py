@@ -15,7 +15,7 @@ import sqlite3
 import openpyxl
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "nutrisync.db")
+DB_PATH = os.getenv("NUTRISYNC_DB_PATH", os.path.join(os.path.dirname(__file__), "nutrisync.db"))
 EXCEL_PATH = os.path.join(os.path.dirname(__file__), "data", "anuvaad.xlsx")
 
 

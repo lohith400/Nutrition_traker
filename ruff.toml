@@ -1,0 +1,17 @@
+# Minimal ruff configuration
+# Do not reformat existing codebase; lint for critical errors only
+
+target-version = "py312"
+line-length = 120
+
+[lint]
+select = [
+    "E9",   # Syntax errors
+    "F63",  # Assertions and comparisons
+    "F7",   # Syntax errors / undefined names in __all__
+    "F82",  # Undefined symbols in forward references
+]
+ignore = []
+
+[lint.per-file-ignores]
+# Keep clean
