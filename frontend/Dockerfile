@@ -2,7 +2,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Install dependencies
 # -----------------------------------------------------------------------------
-FROM node:20.18.3-alpine3.21 AS deps
+FROM node:25.2.1-alpine3.21 AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
@@ -12,7 +12,7 @@ RUN npm ci
 # -----------------------------------------------------------------------------
 # Stage 2: Build the Next.js application
 # -----------------------------------------------------------------------------
-FROM node:20.18.3-alpine3.21 AS builder
+FROM node:25.2.1-alpine3.21 AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -34,7 +34,7 @@ RUN npm run build
 # -----------------------------------------------------------------------------
 # Stage 3: Minimal production runner
 # -----------------------------------------------------------------------------
-FROM node:20.18.3-alpine3.21 AS runner
+FROM node:25.2.1-alpine3.21 AS runner
 WORKDIR /app
 
 ARG BUILD_DATE
