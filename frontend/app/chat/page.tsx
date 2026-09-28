@@ -99,7 +99,7 @@ export default function ChatPage() {
         <div className="workspace-card"><div className="avatar avatar-sm">{name[0]?.toUpperCase() || "N"}</div><div><b>{name}&apos;s space</b><small>Personal plan</small></div></div>
         <nav className="nav">
           {nav.map(([label, Icon]) => (
-            <Link className="nav-item" href="/" key={label}><Icon size={18} />{label}</Link>
+            <Link className="nav-item" href={label === "Food log" ? "/log" : "/"} key={label}><Icon size={18} />{label}</Link>
           ))}
         </nav>
         <div className="sidebar-footer">

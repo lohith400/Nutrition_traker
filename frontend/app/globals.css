@@ -54,3 +54,18 @@
 .chat-input-row input{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13px;outline:0;background:#fff}
 .chat-input-row input:focus{border-color:var(--green);outline:2px solid rgba(74,101,89,.12)}
 @media(max-width:720px){.chat-wrap{padding:20px 16px}.chat-row{max-width:94%}}
+
+/* ---------- Food log history page ---------- */
+.pattern-banner{background:#fbf3e3;border-color:#f0e0b8;color:#8a6a2a}
+.log-days{display:flex;flex-direction:column;gap:10px}
+.log-day{background:rgba(255,255,255,.78);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+.log-day-head{width:100%;display:flex;align-items:center;gap:12px;padding:16px 18px;text-align:left;color:var(--ink)}
+.log-chevron{flex-shrink:0;color:var(--soft);transition:transform .15s ease}
+.log-day.open .log-chevron{transform:rotate(180deg)}
+.log-day-title{font-weight:700;font-size:13px;min-width:96px}
+.log-day-sub{color:var(--soft);font-size:11px}
+.log-day-totals{margin-left:auto;font-size:11px;color:var(--muted);white-space:nowrap}
+.log-day-totals b{color:var(--ink)}
+.log-day-totals i{font-style:normal;color:var(--line);margin:0 2px}
+.log-day-body{padding:0 18px 12px;border-top:1px solid #f2efe8}
+@media(max-width:720px){.log-day-head{flex-wrap:wrap}.log-day-totals{margin-left:0;width:100%}}
