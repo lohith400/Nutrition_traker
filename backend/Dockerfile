@@ -2,7 +2,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Build & wheels
 # -----------------------------------------------------------------------------
-FROM python:3.12.9-slim-bookworm AS builder
+FROM python:3.14.7-slim-bookworm AS builder
 
 WORKDIR /build
 
@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime
 # -----------------------------------------------------------------------------
-FROM python:3.12.9-slim-bookworm AS runner
+FROM python:3.14.7-slim-bookworm AS runner
 
 ARG BUILD_DATE
 ARG VCS_REF
