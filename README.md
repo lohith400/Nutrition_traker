@@ -151,3 +151,16 @@ nutrisync.db is not committed (it is gitignored), so run `python backend/db_setu
 ## Security
 
 The AI provider key must be supplied through `backend/.env` or deployment secrets. Never commit a real key. Any previously exposed key should be revoked and replaced.
+
+
+## Reminders
+
+Open **Reminders** in the sidebar, or tell the Coach, e.g. "remind me at 2 pm to eat 2 boiled eggs" or "remind me at 4 pm to drink water". At the set time NutriSync logs the food/water (untick *auto-log* for a nudge only) and notifies you.
+
+Phone/email notifications are free and optional. Set them in `backend/.env`, then restart the backend, then press **Send test** on the Reminders page:
+
+- **Phone push (recommended): ntfy.** Install the ntfy app, subscribe to a long random topic, set `NTFY_TOPIC=<that topic>`. Works even when the backend runs on your laptop, because the backend only makes an outbound request.
+- **Email:** set `SMTP_USER`, `SMTP_PASSWORD` (a Gmail *App Password*, needs 2-step verification) and optionally `NOTIFY_EMAIL_TO`.
+- **SMS/WhatsApp:** not included. There is no reliable free option for India (SMS needs DLT registration and paid credits).
+
+Reminders are fired by the backend, so the backend must be running at that time. A reminder more than 15 minutes late (server was off) is skipped, not logged. Set `TZ=Asia/Kolkata` for Docker/cloud so times match your clock.

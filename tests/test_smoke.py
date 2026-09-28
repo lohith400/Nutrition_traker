@@ -19,6 +19,7 @@ def test_client():
     """Create a temporary test database and return a FastAPI TestClient."""
     # Ensure network calls fail if attempted
     os.environ["OPENROUTER_API_KEY"] = ""
+    os.environ["NUTRISYNC_NO_SCHEDULER"] = "1"  # tests drive reminders.run_due() by hand
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp_file:
         tmp_db_path = tmp_file.name
@@ -31,7 +32,7 @@ def test_client():
     db_setup.build_database()
 
     # Re-bind DB_PATH on all backend modules
-    from backend import math_engine, memory_agent, menu_planner, orchestrator, rag_resolver
+    from backend import math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders
     from backend.app import app
 
     math_engine.DB_PATH = tmp_db_path
@@ -176,3 +177,32 @@ def test_vegetarian_diet_blocks_meat_matches(test_client):
     assert res.status_code == 200
     res = test_client.post("/api/log-food", json={"item_name": "chicken curry", "quantity": 1, "unit": "serving", "meal_type": "lunch"})
     assert res.status_code == 409
+
+
+def test_reminders_fire_log_and_skip_stale(test_client):
+    from datetime import datetime
+    from backend import memory_agent, reminders
+
+    test_client.post("/api/profile/onboarding", json={
+        "name": "T", "age": 25, "sex": "male", "height_cm": 175, "current_weight_kg": 70,
+        "target_weight_kg": 68, "goal": "lose_weight", "activity_level": "moderate", "diet": "any"})
+
+    bad = test_client.post("/api/reminders", json={"kind": "food", "time": "14:00", "food_name": "zzzqqq"})
+    assert bad.status_code == 422
+    assert test_client.post("/api/reminders", json={"kind": "water", "time": "99:99"}).status_code == 422
+
+    food = test_client.post("/api/reminders", json={"kind": "food", "time": "14:00", "food_name": "idli", "quantity": 2})
+    water = test_client.post("/api/reminders", json={"kind": "water", "time": "10:00", "water_ml": 300})
+    assert food.status_code == 200 and water.status_code == 200
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    at = lambda hm: datetime.strptime(f"{today} {hm}", "%Y-%m-%d %H:%M")
+
+    assert reminders.run_due(at("13:59")) == []                      # not due yet
+    water_before = memory_agent.get_todays_water()["consumed_water_l"]
+    fired = reminders.run_due(at("14:01"))
+    assert len(fired) == 1 and fired[0]["logged"]                    # food fired + logged
+    assert "Idli" in [m["food_name"] for m in memory_agent.get_todays_logs()["meals"]]
+    assert reminders.run_due(at("14:02")) == []                      # never fires twice a day
+    assert memory_agent.get_todays_water()["consumed_water_l"] == water_before  # 10:00 water was >15 min late: skipped
+    assert len(test_client.get("/api/reminders/events").json()["events"]) == 1  # only the food one fired

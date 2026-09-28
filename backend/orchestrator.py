@@ -13,9 +13,9 @@ from datetime import datetime
 from openai import OpenAI
 
 try:
-    from backend import math_engine, memory_agent, menu_planner, places_finder, rag_resolver
+    from backend import math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
 except ImportError:
-    import math_engine, memory_agent, menu_planner, places_finder, rag_resolver
+    import math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
 
 MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -77,6 +77,10 @@ def _claims_logged(text: str) -> bool:
 
 def _log_succeeded(events: list) -> bool:
     return any(e.get("tool") == "log_food" and (e.get("result") or {}).get("status") == "logged" for e in events)
+
+
+def _reminder_created(events: list) -> bool:
+    return any(e.get("tool") == "create_reminder" and (e.get("result") or {}).get("status") == "created" for e in events)
 
 
 def _last_log_error(events: list) -> str:
@@ -246,7 +250,72 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_reminder",
+            "description": (
+                "Create a reminder that fires at a set time: it sends a notification and (by default) automatically "
+                "logs the food or water at that moment. Use when the user says things like 'remind me at 2 pm to eat "
+                "an egg sandwich' or 'remind me to drink water at 4'. This is NOT logging now -- do not call log_food "
+                "for a reminder request. For a food reminder, call lookup_food first so the food name is valid. "
+                "Convert times to 24-hour HH:MM (2 pm -> 14:00). repeat='once' for 'today'/'tomorrow'/a single "
+                "occurrence, repeat='daily' only if the user says every day/daily. If the time is missing, ask for it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["food", "water"]},
+                    "time": {"type": "string", "description": "24-hour HH:MM, e.g. '14:00'."},
+                    "repeat": {"type": "string", "enum": ["once", "daily"]},
+                    "food_name": {"type": "string", "description": "For kind='food': the food, e.g. 'egg sandwich'."},
+                    "quantity": {"type": "number", "description": "For food. Default 1."},
+                    "unit": {"type": "string", "enum": ["serving", "grams"]},
+                    "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"]},
+                    "water_ml": {"type": "number", "description": "For kind='water': millilitres, e.g. 250. Default 250."},
+                    "auto_log": {"type": "boolean", "description": "Auto-log at reminder time. Default true; false if the user only wants a nudge."},
+                },
+                "required": ["kind", "time"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_reminders",
+            "description": "List the user's current reminders (id, time, what, repeat, enabled).",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_reminder",
+            "description": "Delete a reminder by id. Call list_reminders first if you don't know the id, and confirm which one if it is ambiguous.",
+            "parameters": {
+                "type": "object",
+                "properties": {"reminder_id": {"type": "integer"}},
+                "required": ["reminder_id"],
+            },
+        },
+    },
 ]
+
+
+def _tool_create_reminder(args):
+    return reminders.create_reminder(
+        args.get("kind", ""), args.get("time", ""), args.get("repeat") or "once",
+        args.get("food_name"), args.get("quantity") or 1, args.get("unit") or "serving",
+        args.get("meal_type"), args.get("water_ml"), args.get("auto_log", True) is not False,
+    )
+
+
+def _tool_delete_reminder(args):
+    try:
+        rid = int(args.get("reminder_id"))
+    except (TypeError, ValueError):
+        return {"status": "error", "error": "reminder_id must be a number"}
+    return {"status": "deleted"} if reminders.delete_reminder(rid) else {"status": "error", "error": "No reminder with that id."}
 
 
 def _tool_find_restaurants(args, location=None):
@@ -304,6 +373,9 @@ TOOL_IMPL = {
     "log_food": lambda args: tool_log_food_item(args.get("item_name", ""), args.get("quantity", 1) or 1, args.get("meal_type") or "snack", args.get("unit") or "serving"),
     "get_today_summary": lambda args: _context(),
     "suggest_meal": lambda args: _tool_suggest_meal(args.get("meal_type"), bool(args.get("whole_day"))),
+    "create_reminder": _tool_create_reminder,
+    "list_reminders": lambda args: {"status": "ok", "reminders": reminders.list_reminders()},
+    "delete_reminder": _tool_delete_reminder,
 }
 
 MAX_TOOL_ROUNDS = 5
@@ -351,6 +423,13 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
         "clearly saying these are ideas that fit their remaining budget, not confirmed items on that restaurant's menu. "
         "If find_restaurants returns need_location, ask them to tap the location pin or tell you their area. "
         "If it returns not_configured or error, tell them plainly what is wrong.\n"
+        "REMINDERS: if the user asks to be reminded ('remind me at 2 pm to eat 2 boiled eggs', 'remind me to drink water at 4'), "
+        "that is a reminder request, NOT a request to log now. For food: call lookup_food once to check the name, then call create_reminder "
+        "(kind='food', time in 24h HH:MM, repeat='once' unless they say daily/every day). For water: call create_reminder (kind='water', water_ml default 250). "
+        "Do not ask 'should I log it' -- the reminder logs it automatically at that time. If they gave no time, ask for it. "
+        "Never say a reminder was set unless create_reminder returned status 'created'; if it returned an error, say what went wrong. "
+        "After creating, confirm in one short sentence with the time and what will be logged. Use list_reminders / delete_reminder when asked to show or cancel reminders. "
+        "The current local time is " + datetime.now().strftime("%H:%M on %Y-%m-%d") + ".\n"
         "If lookup_food returns not_found, say so plainly, don't invent numbers, and ask them to rephrase "
         "or try a simpler/more common name. If it returns diet_mismatch, tell them that food doesn't fit "
         "their diet and ask if they'd like an alternative.\n"
@@ -408,7 +487,7 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
 
         if not msg.tool_calls:
             reply = msg.content or "I could not generate a response right now."
-            if _claims_logged(reply) and not _log_succeeded(tool_events):
+            if _claims_logged(reply) and not _log_succeeded(tool_events) and not _reminder_created(tool_events):
                 if not nudged:
                     # Ask the model to actually call log_food (or retract the claim).
                     nudged = True

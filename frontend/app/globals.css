@@ -237,3 +237,21 @@ a{color:inherit;text-decoration:none}
 .resto-links{display:flex;gap:14px;margin-top:8px}
 .resto-links a{display:inline-flex;align-items:center;gap:5px;color:var(--green-dark);font-weight:600;text-decoration:none}
 .resto-links a:hover{text-decoration:underline}
+/* ---------- Reminders ---------- */
+.notif-dropdown .notif-sub{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}.notif-time{font-weight:700;color:var(--green-dark)}
+.reminder-toast{position:fixed;right:22px;bottom:22px;z-index:40;display:flex;align-items:flex-start;gap:12px;max-width:340px;padding:14px 14px 14px 16px;background:#fff;border:1px solid #dfe6d9;border-left:4px solid var(--green);border-radius:12px;box-shadow:0 18px 40px rgba(28,38,26,.16);color:var(--green-dark)}
+.reminder-toast b{display:block;font-size:12px}.reminder-toast p{margin:4px 0 0;font-size:11px;line-height:1.55;color:var(--muted)}.reminder-toast button{color:var(--soft);margin-left:4px}
+.rem-layout{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:16px;margin-top:28px;align-items:start}
+.rem-form{display:grid;gap:14px;margin-top:16px}.rem-form label{display:grid;gap:6px;color:var(--muted);font-size:11px;font-weight:600}
+.rem-form input,.rem-form select{width:100%;min-width:0;border:1px solid var(--line);border-radius:9px;padding:11px 12px;background:#fff;color:var(--ink);font-size:12px;outline:0}
+.rem-form input:focus,.rem-form select:focus{border-color:var(--green);outline:2px solid rgba(74,101,89,.12)}
+.rem-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.rem-kind{display:flex;gap:8px}.rem-kind button{flex:1;padding:10px 0;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:12px;font-weight:600;color:var(--muted)}.rem-kind button.on{background:var(--green-dark);border-color:var(--green-dark);color:#fff}
+.rem-check{display:flex!important;align-items:flex-start;gap:9px;font-weight:500!important;line-height:1.5}.rem-check input{width:auto;margin-top:2px}
+.rem-item{display:flex;align-items:center;gap:12px;padding:13px 0;border-top:1px solid #f2efe8}.rem-item:first-child{border-top:0}
+.rem-time{min-width:58px;font-size:17px;font-weight:600;letter-spacing:-.04em;color:var(--green-dark)}
+.rem-item.off .rem-time,.rem-item.off .meal-info{opacity:.45}
+.rem-actions{display:flex;align-items:center;gap:6px}.rem-actions button{padding:6px 9px;border:1px solid var(--line);border-radius:8px;font-size:10px;font-weight:600;color:var(--green-dark);background:#f3f7f2}.rem-actions button.danger{color:#b05b4a;background:#fbf1ee}
+.chan-list{display:grid;gap:8px;margin:14px 0}.chan{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}.chan i{width:8px;height:8px;border-radius:50%;background:#d9d6cd}.chan.on i{background:#5aa17a}.chan b{color:var(--ink)}
+.rem-hint{margin:10px 0 0;font-size:11px;line-height:1.65;color:var(--soft)}.rem-hint code{background:#f0efe9;border-radius:5px;padding:1px 5px;font-size:10px}
+@media(max-width:980px){.rem-layout{grid-template-columns:1fr}}@media(max-width:560px){.rem-row2{grid-template-columns:1fr}}

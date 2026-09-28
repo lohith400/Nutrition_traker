@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Camera, CheckCircle2, ExternalLink, MapPin, Mic, Plus, Search, Send, Sparkles, Square, Star, Trash2, Volume2, VolumeX, X } from "lucide-react";
+import { AlarmClock, AlertTriangle, Camera, CheckCircle2, ExternalLink, MapPin, Mic, Plus, Search, Send, Sparkles, Square, Star, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import Shell, { API } from "../components/Shell";
 import { useVoiceChat } from "../hooks/useVoiceChat";
 
@@ -138,6 +138,18 @@ function ToolCard({ event }: { event: ToolEvent }) {
       return <div className="tool-card tool-card-warn"><AlertTriangle size={14} /> Not logged — {reason}</div>;
     }
     return <div className="tool-card tool-card-logged"><CheckCircle2 size={14} /> Logged <b>{String(result.matched_to)}</b> — {String(result.calories)} kcal, {String(result.protein_g)}g protein.</div>;
+  }
+  if (tool === "create_reminder") {
+    if (result.status !== "created") {
+      return <div className="tool-card tool-card-warn"><AlertTriangle size={14} /> Reminder not set — {String(result.error || "unknown error")}</div>;
+    }
+    const r = (result.reminder || {}) as Record<string, unknown>;
+    const what = r.kind === "water" ? `${Math.round(Number(r.water_l) * 1000)} ml water` : `${String(r.food_name)} × ${String(r.quantity)}`;
+    const when = r.repeat === "daily" ? `every day at ${String(r.remind_time)}` : `${String(r.once_date)} at ${String(r.remind_time)}`;
+    return <div className="tool-card tool-card-logged"><AlarmClock size={14} /> Reminder set: <b>{what}</b> — {when}{r.auto_log ? " (auto-logs)" : ""}.</div>;
+  }
+  if (tool === "delete_reminder" && event.result.status === "deleted") {
+    return <div className="tool-card tool-card-logged"><AlarmClock size={14} /> Reminder deleted.</div>;
   }
   return null;
 }

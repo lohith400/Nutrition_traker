@@ -1,6 +1,8 @@
 """NutriSync HTTP API."""
 import os
 import sys
+import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -17,13 +19,26 @@ load_dotenv(ROOT / ".env")
 for p in (DIR, ROOT):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
+if os.getenv("TZ") and hasattr(time, "tzset"):
+    time.tzset()  # apply TZ from .env so reminder times match your local clock
 
 try:
-    from backend import math_engine, memory_agent, menu_planner, orchestrator, rag_resolver  # noqa: E402
+    from backend import math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
 except ImportError:
-    import math_engine, memory_agent, menu_planner, orchestrator, rag_resolver  # noqa: E402
+    import math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
 
-app = FastAPI(title="NutriSync API", version="0.4.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Background thread that fires food/water reminders at their scheduled time.
+    # Skipped under pytest (the tests set NUTRISYNC_NO_SCHEDULER=1) so tests stay deterministic.
+    if os.getenv("NUTRISYNC_NO_SCHEDULER") != "1":
+        reminders.start_scheduler()
+    yield
+    reminders.stop_scheduler()
+
+
+app = FastAPI(title="NutriSync API", version="0.5.0", lifespan=lifespan)
 origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if x.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
@@ -60,6 +75,22 @@ class ChatRequest(BaseModel):
 
 class WaterLogRequest(BaseModel):
     amount_l: float = Field(gt=0, le=5)
+
+
+class ReminderCreateRequest(BaseModel):
+    kind: Literal["food", "water"]
+    time: str = Field(description="24-hour HH:MM, e.g. 14:00")
+    repeat: Literal["daily", "once"] = "daily"
+    food_name: str | None = None
+    quantity: float = Field(default=1.0, gt=0, le=2000)
+    unit: Literal["serving", "grams"] = "serving"
+    meal_type: str | None = None
+    water_ml: float | None = Field(default=None, ge=50, le=2000)
+    auto_log: bool = True
+
+
+class ReminderToggleRequest(BaseModel):
+    enabled: bool
 
 
 @app.get("/health")
@@ -210,3 +241,55 @@ def chat(payload: ChatRequest):
         raise HTTPException(status_code=502, detail=f"Coach provider error: {exc}") from exc
     memory_agent.save_chat_message("assistant", result["reply"], result.get("tool_events"))
     return {"reply": result["reply"], "tool_events": result.get("tool_events", []), "overview": get_overview(), "recent_meals": memory_agent.get_todays_logs()}
+
+
+# ---------------------------------------------------------------------------
+# Reminders
+# ---------------------------------------------------------------------------
+
+@app.get("/api/reminders")
+def list_reminders():
+    return {"reminders": reminders.list_reminders(), "channels": reminders.channel_status(),
+            "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+
+@app.post("/api/reminders")
+def create_reminder(payload: ReminderCreateRequest):
+    result = reminders.create_reminder(payload.kind, payload.time, payload.repeat, payload.food_name,
+                                       payload.quantity, payload.unit, payload.meal_type, payload.water_ml,
+                                       payload.auto_log)
+    if result["status"] != "created":
+        raise HTTPException(status_code=422, detail=result["error"])
+    return result
+
+
+@app.patch("/api/reminders/{reminder_id}")
+def toggle_reminder(reminder_id: int, payload: ReminderToggleRequest):
+    if not reminders.set_enabled(reminder_id, payload.enabled):
+        raise HTTPException(status_code=404, detail="Reminder not found.")
+    return {"status": "updated"}
+
+
+@app.delete("/api/reminders/{reminder_id}")
+def remove_reminder(reminder_id: int):
+    if not reminders.delete_reminder(reminder_id):
+        raise HTTPException(status_code=404, detail="Reminder not found.")
+    return {"status": "deleted"}
+
+
+@app.get("/api/reminders/events")
+def reminder_events(since_id: int = 0):
+    """Fired reminders, newest first. The website polls this to show alerts."""
+    return {"events": reminders.list_events(since_id)}
+
+
+@app.post("/api/reminders/test-notification")
+def test_notification():
+    """Send a test push/email so you can check your phone setup."""
+    status = reminders.channel_status()
+    if not (status["ntfy"] or status["email"]):
+        raise HTTPException(status_code=409, detail="No phone/email channel is configured. Set NTFY_TOPIC (or SMTP_* ) in backend/.env and restart the backend.")
+    result = reminders.send_notifications("NutriSync: test", "Test notification from NutriSync. If you can read this, reminders will reach you.")
+    if not result["sent"]:
+        raise HTTPException(status_code=502, detail=f"Delivery failed: {result['errors']}")
+    return result
