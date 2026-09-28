@@ -1,11 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Activity, Bell, ChevronDown, ChevronRight, Home, Leaf, MessageCircle, Sparkles, TrendingUp, Utensils, Zap } from "lucide-react";
+import { ChevronDown, Sparkles, TrendingUp } from "lucide-react";
+import Shell from "../components/Shell";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const nav = [["Overview", Home], ["Food log", Utensils], ["Meal plans", Leaf], ["Progress", Activity]] as const;
 
 type MealRow = { meal_type: string; food_name: string; quantity: number; calories: number; protein_g: number; carbs_g: number; fat_g: number; log_time: string };
 type DayEntry = { date: string; meals: MealRow[]; total_calories: number; total_protein_g: number; total_carbs_g: number; total_fat_g: number };
@@ -51,30 +50,7 @@ export default function LogPage() {
   const proteinTarget = profile?.target_protein_g || 0;
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand"><span className="brand-badge"><Sparkles size={18} /></span>Nutri<span>Sync</span></div>
-        <div className="workspace-card"><div className="avatar avatar-sm">{name[0]?.toUpperCase() || "N"}</div><div><b>{name}&apos;s space</b><small>Personal plan</small></div></div>
-        <nav className="nav">
-          {nav.map(([label, Icon]) => (
-            label === "Food log"
-              ? <Link className="nav-item active" href="/log" key={label}><Icon size={18} />{label}</Link>
-              : <Link className="nav-item" href="/" key={label}><Icon size={18} />{label}</Link>
-          ))}
-        </nav>
-        <div className="sidebar-footer">
-          <button className="nav-item"><Zap size={18} />Daily focus</button>
-          <Link className="nav-item" href="/chat"><MessageCircle size={18} />Coach chat</Link>
-          <div className="profile-mini"><div className="avatar">{name[0]?.toUpperCase() || "N"}</div><div><b>{name}</b><small>Personal plan</small></div></div>
-        </div>
-      </aside>
-
-      <section className="main-panel">
-        <header className="topbar">
-          <div className="crumbs">My nutrition <ChevronRight size={15} /> <b>Food log</b></div>
-          <div className="top-actions"><Bell size={18} /><div className="avatar">{name[0]?.toUpperCase() || "N"}</div></div>
-        </header>
-
+    <Shell active="log" crumb="Food log">
         <div className="page-wrap">
           <div className="hero-row">
             <div>
@@ -132,7 +108,6 @@ export default function LogPage() {
             })}
           </div>
         </div>
-      </section>
-    </main>
+    </Shell>
   );
 }
