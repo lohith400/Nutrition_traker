@@ -13,9 +13,9 @@ from datetime import datetime
 from openai import OpenAI
 
 try:
-    from backend import math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
+    from backend import grocery, math_engine, memory_agent, menu_planner, places_finder, rag_resolver
 except ImportError:
-    import math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
+    import grocery, math_engine, memory_agent, menu_planner, places_finder, rag_resolver
 
 MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -76,11 +76,14 @@ def _claims_logged(text: str) -> bool:
 
 
 def _log_succeeded(events: list) -> bool:
-    return any(e.get("tool") == "log_food" and (e.get("result") or {}).get("status") == "logged" for e in events)
-
-
-def _reminder_created(events: list) -> bool:
-    return any(e.get("tool") == "create_reminder" and (e.get("result") or {}).get("status") == "created" for e in events)
+    """True when this turn really saved something: a food log, or a grocery list change."""
+    for e in events:
+        status = (e.get("result") or {}).get("status")
+        if e.get("tool") == "log_food" and status == "logged":
+            return True
+        if e.get("tool") in ("add_grocery_items", "remove_grocery_items") and status == "ok":
+            return True
+    return False
 
 
 def _last_log_error(events: list) -> str:
@@ -253,69 +256,106 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "create_reminder",
+            "name": "add_grocery_items",
             "description": (
-                "Create a reminder that fires at a set time: it sends a notification and (by default) automatically "
-                "logs the food or water at that moment. Use when the user says things like 'remind me at 2 pm to eat "
-                "an egg sandwich' or 'remind me to drink water at 4'. This is NOT logging now -- do not call log_food "
-                "for a reminder request. For a food reminder, call lookup_food first so the food name is valid. "
-                "Convert times to 24-hour HH:MM (2 pm -> 14:00). repeat='once' for 'today'/'tomorrow'/a single "
-                "occurrence, repeat='daily' only if the user says every day/daily. If the time is missing, ask for it."
+                "Add ingredients the user has bought / has at home to their grocery list (pantry). Call it whenever "
+                "the user says things like 'add 1 kg rice', 'I bought 6 eggs and 2 kg tomato', 'put paneer in my grocery'. "
+                "No confirmation needed. This only edits the list -- it is NOT the food log."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "kind": {"type": "string", "enum": ["food", "water"]},
-                    "time": {"type": "string", "description": "24-hour HH:MM, e.g. '14:00'."},
-                    "repeat": {"type": "string", "enum": ["once", "daily"]},
-                    "food_name": {"type": "string", "description": "For kind='food': the food, e.g. 'egg sandwich'."},
-                    "quantity": {"type": "number", "description": "For food. Default 1."},
-                    "unit": {"type": "string", "enum": ["serving", "grams"]},
-                    "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"]},
-                    "water_ml": {"type": "number", "description": "For kind='water': millilitres, e.g. 250. Default 250."},
-                    "auto_log": {"type": "boolean", "description": "Auto-log at reminder time. Default true; false if the user only wants a nudge."},
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "description": "Ingredient name, e.g. 'rice', 'tomato'."},
+                                "quantity": {"type": "number", "description": "Amount; 1 if the user gave none."},
+                                "unit": {"type": "string", "description": "kg, g, l, ml, pcs, pack, dozen or bunch. Use pcs for counted things like eggs."},
+                            },
+                            "required": ["name"],
+                        },
+                    },
                 },
-                "required": ["kind", "time"],
+                "required": ["items"],
             },
         },
     },
     {
         "type": "function",
         "function": {
-            "name": "list_reminders",
-            "description": "List the user's current reminders (id, time, what, repeat, enabled).",
+            "name": "remove_grocery_items",
+            "description": (
+                "Remove ingredients from the grocery list, or reduce their quantity, when the user says they used "
+                "them up / finished them / want them removed ('remove tomato', 'I used 200 g rice'). Leave quantity "
+                "out to remove the item completely."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "quantity": {"type": "number"},
+                                "unit": {"type": "string"},
+                            },
+                            "required": ["name"],
+                        },
+                    },
+                },
+                "required": ["items"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_grocery_list",
+            "description": (
+                "Read the user's grocery list (ingredients they have at home). Call this ONLY when the user explicitly "
+                "asks for a meal/recipe made from what they have (e.g. 'suggest a meal from my grocery list', 'what can I "
+                "cook today with what I have', 'use my available ingredients'), or asks to see/check their grocery list. "
+                "Do NOT call it for ordinary 'what should I eat' questions -- those use suggest_meal."
+            ),
             "parameters": {"type": "object", "properties": {}},
         },
     },
     {
         "type": "function",
         "function": {
-            "name": "delete_reminder",
-            "description": "Delete a reminder by id. Call list_reminders first if you don't know the id, and confirm which one if it is ambiguous.",
+            "name": "analyze_grocery_meal",
+            "description": (
+                "After get_grocery_list, propose ONE meal made ONLY from items on the grocery list and get its exact "
+                "nutrition. Pass every ingredient with the gram amount you want to use (convert pieces to grams, e.g. "
+                "1 egg ~ 50 g). The tool checks each ingredient is on the list and in stock, looks up nutrition in the "
+                "food database and adds up calories / protein / carbs / fat for you -- never add numbers yourself. "
+                "Water and salt are always allowed."
+            ),
             "parameters": {
                 "type": "object",
-                "properties": {"reminder_id": {"type": "integer"}},
-                "required": ["reminder_id"],
+                "properties": {
+                    "meal_name": {"type": "string", "description": "e.g. 'Egg fried rice'."},
+                    "ingredients": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "description": "Ingredient exactly as named on the grocery list."},
+                                "grams": {"type": "number", "description": "Amount to use, in grams."},
+                            },
+                            "required": ["name", "grams"],
+                        },
+                    },
+                },
+                "required": ["meal_name", "ingredients"],
             },
         },
     },
 ]
-
-
-def _tool_create_reminder(args):
-    return reminders.create_reminder(
-        args.get("kind", ""), args.get("time", ""), args.get("repeat") or "once",
-        args.get("food_name"), args.get("quantity") or 1, args.get("unit") or "serving",
-        args.get("meal_type"), args.get("water_ml"), args.get("auto_log", True) is not False,
-    )
-
-
-def _tool_delete_reminder(args):
-    try:
-        rid = int(args.get("reminder_id"))
-    except (TypeError, ValueError):
-        return {"status": "error", "error": "reminder_id must be a number"}
-    return {"status": "deleted"} if reminders.delete_reminder(rid) else {"status": "error", "error": "No reminder with that id."}
 
 
 def _tool_find_restaurants(args, location=None):
@@ -368,14 +408,83 @@ def _tool_suggest_meal(meal_type=None, whole_day=False):
     return menu_planner.suggest_next_meal(budget["remaining_protein_g"], budget["remaining_calories"], diet, meal_type)
 
 
+_FREE_INGREDIENTS = {"water", "salt"}
+
+
+def _tool_get_grocery_list():
+    items = grocery.list_items()
+    if not items:
+        return {"status": "empty", "items": [],
+                "message": "The grocery list is empty. Tell the user to add ingredients (here in chat or on the Grocery page)."}
+    return {"status": "ok", "items": [{"name": i["name"], "quantity": i["quantity"], "unit": i["unit"]} for i in items]}
+
+
+def _tool_analyze_grocery_meal(meal_name, ingredients):
+    """Builds a meal strictly from the grocery list. Enforced in code, not just in the prompt."""
+    if not ingredients:
+        return {"status": "error", "error": "No ingredients given."}
+    not_on_list, short_on_stock, rows, unresolved = [], [], [], []
+    for ing in ingredients:
+        name = str(ing.get("name", "")).strip()
+        try:
+            grams = float(ing.get("grams") or 0)
+        except (TypeError, ValueError):
+            grams = 0
+        if not name or grams <= 0:
+            continue
+        if name.lower() in _FREE_INGREDIENTS:
+            continue
+        item = grocery.find_item(name)
+        if not item:
+            not_on_list.append(name)
+            continue
+        stock = grocery.grams_available(item)
+        if stock is not None and grams > stock + 0.5:
+            short_on_stock.append({"name": item["name"], "needed_g": round(grams), "have": f"{item['quantity']} {item['unit']}"})
+            continue
+        rows.append((item, grams))
+    if not_on_list:
+        return {"status": "rejected", "not_on_grocery_list": not_on_list,
+                "message": "These ingredients are NOT on the user's grocery list. Rebuild the meal using only listed items (plus water/salt), or tell the user what is missing."}
+    if short_on_stock:
+        return {"status": "rejected", "not_enough_stock": short_on_stock,
+                "message": "The user doesn't have enough of these. Reduce the amounts or pick other listed items."}
+    if not rows:
+        return {"status": "error", "error": "No usable ingredients."}
+
+    lines, totals = [], {"calories": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0}
+    for item, grams in rows:
+        found = _tool_lookup_food(item["name"], grams, "grams")
+        if found.get("status") != "found":
+            unresolved.append({"name": item["name"], "reason": str(found.get("error") or found.get("message") or found.get("status"))})
+            continue
+        lines.append({"name": item["name"], "grams": round(grams), "matched_to": found.get("food_name"),
+                      "calories": round(found["calories"], 1), "protein_g": round(found["protein_g"], 1),
+                      "carbs_g": round(found["carbs_g"], 1), "fat_g": round(found["fat_g"], 1)})
+        for k in totals:
+            totals[k] += found[k]
+    if not lines:
+        return {"status": "error", "error": "Couldn't find nutrition data for any of these ingredients.", "unresolved": unresolved}
+    result = {"status": "ok", "meal_name": meal_name, "ingredients": lines,
+              "totals": {k: round(v, 1) for k, v in totals.items()}}
+    if unresolved:
+        result["unresolved"] = unresolved
+        result["note"] = "Totals exclude the unresolved ingredients. Say so."
+    budget = math_engine.get_remaining_budget_today(datetime.now().strftime("%Y-%m-%d"))
+    if "error" not in budget:
+        result["remaining_today_before_this_meal"] = {"calories": budget["remaining_calories"], "protein_g": budget["remaining_protein_g"]}
+    return result
+
+
 TOOL_IMPL = {
+    "add_grocery_items": lambda args: grocery.add_items(args.get("items") or []),
+    "remove_grocery_items": lambda args: grocery.remove_items(args.get("items") or []),
+    "get_grocery_list": lambda args: _tool_get_grocery_list(),
+    "analyze_grocery_meal": lambda args: _tool_analyze_grocery_meal(args.get("meal_name", "Meal"), args.get("ingredients") or []),
     "lookup_food": lambda args: _tool_lookup_food(args.get("item_name", ""), args.get("quantity", 1) or 1, args.get("unit") or "serving"),
     "log_food": lambda args: tool_log_food_item(args.get("item_name", ""), args.get("quantity", 1) or 1, args.get("meal_type") or "snack", args.get("unit") or "serving"),
     "get_today_summary": lambda args: _context(),
     "suggest_meal": lambda args: _tool_suggest_meal(args.get("meal_type"), bool(args.get("whole_day"))),
-    "create_reminder": _tool_create_reminder,
-    "list_reminders": lambda args: {"status": "ok", "reminders": reminders.list_reminders()},
-    "delete_reminder": _tool_delete_reminder,
 }
 
 MAX_TOOL_ROUNDS = 5
@@ -423,17 +532,24 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
         "clearly saying these are ideas that fit their remaining budget, not confirmed items on that restaurant's menu. "
         "If find_restaurants returns need_location, ask them to tap the location pin or tell you their area. "
         "If it returns not_configured or error, tell them plainly what is wrong.\n"
-        "REMINDERS: if the user asks to be reminded ('remind me at 2 pm to eat 2 boiled eggs', 'remind me to drink water at 4'), "
-        "that is a reminder request, NOT a request to log now. For food: call lookup_food once to check the name, then call create_reminder "
-        "(kind='food', time in 24h HH:MM, repeat='once' unless they say daily/every day). For water: call create_reminder (kind='water', water_ml default 250). "
-        "Do not ask 'should I log it' -- the reminder logs it automatically at that time. If they gave no time, ask for it. "
-        "Never say a reminder was set unless create_reminder returned status 'created'; if it returned an error, say what went wrong. "
-        "After creating, confirm in one short sentence with the time and what will be logged. Use list_reminders / delete_reminder when asked to show or cancel reminders. "
-        "The current local time is " + datetime.now().strftime("%H:%M on %Y-%m-%d") + ".\n"
+        "GROCERY LIST (separate from everything else): the user keeps a list of ingredients they have at home. "
+        "(a) When they say they bought/have/want to add ingredients ('add 1 kg rice, 1 kg tomato'), call "
+        "add_grocery_items and confirm what was added; when they say they used up or want to remove something, call "
+        "remove_grocery_items. Never claim the list changed unless the tool returned status 'ok'. "
+        "(b) ONLY when the user explicitly asks for a meal made from their grocery list / what they have at home / "
+        "available ingredients: call get_grocery_list, then build ONE simple meal using ONLY listed items (water and salt "
+        "are free; oil, spices, milk etc. only if they are on the list), call analyze_grocery_meal with gram amounts, "
+        "and report its meal name, ingredients with amounts, and the total calories, protein, carbs and fat exactly "
+        "as returned. Mention any ingredient the tool matched to a differently named database food, and how it fits "
+        "the remaining budget. If the list is empty or can't make a proper meal, say so and say what is missing -- "
+        "never suggest ingredients they don't have. If the tool rejects an ingredient, rebuild without it. Then ask "
+        "whether to log it (and as which meal); on a clear yes, call log_food once per ingredient with unit 'grams'; "
+        "afterwards offer to remove the used amounts from the grocery list. "
+        "(c) For every OTHER request about what to eat, do NOT look at the grocery list -- use suggest_meal as usual.\n"
         "If lookup_food returns not_found, say so plainly, don't invent numbers, and ask them to rephrase "
         "or try a simpler/more common name. If it returns diet_mismatch, tell them that food doesn't fit "
         "their diet and ask if they'd like an alternative.\n"
-        "When the user asks what to eat, for meal ideas, or how to hit their goals, ALWAYS call "
+        "When the user asks what to eat, for meal ideas, or how to hit their goals (and did NOT ask to use their grocery list), ALWAYS call "
         "suggest_meal and present ONLY the foods it returns -- never suggest a food from your own "
         "knowledge, even one that sounds healthy or plausible. If suggest_meal returns nothing useful, "
         "say so honestly rather than filling in your own suggestions.\n"
@@ -487,15 +603,14 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
 
         if not msg.tool_calls:
             reply = msg.content or "I could not generate a response right now."
-            if _claims_logged(reply) and not _log_succeeded(tool_events) and not _reminder_created(tool_events):
+            if _claims_logged(reply) and not _log_succeeded(tool_events):
                 if not nudged:
                     # Ask the model to actually call log_food (or retract the claim).
                     nudged = True
                     messages.append({"role": "assistant", "content": reply})
                     messages.append({"role": "system", "content": (
                         "Your last reply says a food was logged, but log_food has not succeeded in this turn, so nothing "
-                        "was saved. If the user confirmed logging, call log_food now using the food, quantity, unit and "
-                        "meal from the conversation. Otherwise reply again WITHOUT claiming anything was logged.")})
+                        "was saved. If the user confirmed logging, call log_food (or add_grocery_items for groceries) now using the details from the conversation. Otherwise reply again WITHOUT claiming anything was logged.")})
                     continue
                 error = _last_log_error(tool_events)
                 reply = ("I couldn't save that to your food log" + (f" ({error})" if error else "") +

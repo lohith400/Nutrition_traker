@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { AlarmClock, AlertTriangle, Camera, CheckCircle2, ExternalLink, MapPin, Mic, Plus, Search, Send, Sparkles, Square, Star, Trash2, Volume2, VolumeX, X } from "lucide-react";
+import { AlertTriangle, Camera, CheckCircle2, ExternalLink, MapPin, Mic, Plus, Search, Send, ShoppingCart, Sparkles, Square, Star, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import Shell, { API } from "../components/Shell";
 import { useVoiceChat } from "../hooks/useVoiceChat";
 
@@ -97,8 +97,46 @@ function RestaurantCard({ r }: { r: Restaurant }) {
   );
 }
 
+type GroceryLine = { name: string; added?: string; removed?: string; now_have?: string };
+type MealLine = { name: string; grams: number; matched_to?: string; calories: number; protein_g: number; carbs_g: number; fat_g: number };
+
 function ToolCard({ event }: { event: ToolEvent }) {
   const { tool, result } = event;
+  if (tool === "add_grocery_items" || tool === "remove_grocery_items") {
+    const adding = tool === "add_grocery_items";
+    if (result.status !== "ok" || !Array.isArray(result.items)) {
+      return <div className="tool-card tool-card-warn"><AlertTriangle size={14} /> Grocery list not changed — {String(result.error || "unknown error")}</div>;
+    }
+    return (
+      <div className="tool-card tool-card-logged grocery-card">
+        <div><CheckCircle2 size={14} /> {adding ? "Added to your grocery list" : "Updated your grocery list"}</div>
+        <ul>
+          {(result.items as GroceryLine[]).map((i, n) => (
+            <li key={n}><b>{i.name}</b> {adding ? `+${i.added}` : `−${i.removed}`} <span>(now {i.now_have})</span></li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  if (tool === "analyze_grocery_meal") {
+    if (result.status !== "ok") return null;
+    const lines = (result.ingredients || []) as MealLine[];
+    const t = result.totals as { calories: number; protein_g: number; carbs_g: number; fat_g: number };
+    return (
+      <div className="tool-card grocery-meal">
+        <div className="grocery-meal-title"><ShoppingCart size={14} /> {String(result.meal_name)} <span>from your grocery list</span></div>
+        <ul>
+          {lines.map((l, n) => <li key={n}><b>{l.name}</b> {l.grams} g <span>{Math.round(l.calories)} kcal · {l.protein_g}g protein</span></li>)}
+        </ul>
+        <div className="grocery-meal-total">
+          <span><b>{Math.round(t.calories)}</b> kcal</span>
+          <span><b>{t.protein_g}</b> g protein</span>
+          <span><b>{t.carbs_g}</b> g carbs</span>
+          <span><b>{t.fat_g}</b> g fat</span>
+        </div>
+      </div>
+    );
+  }
   if (tool === "find_restaurants") {
     if (result.status === "ok" && Array.isArray(result.restaurants)) {
       return <div className="resto-stack">{(result.restaurants as Restaurant[]).map((r, i) => <RestaurantCard r={r} key={i} />)}</div>;
@@ -138,18 +176,6 @@ function ToolCard({ event }: { event: ToolEvent }) {
       return <div className="tool-card tool-card-warn"><AlertTriangle size={14} /> Not logged — {reason}</div>;
     }
     return <div className="tool-card tool-card-logged"><CheckCircle2 size={14} /> Logged <b>{String(result.matched_to)}</b> — {String(result.calories)} kcal, {String(result.protein_g)}g protein.</div>;
-  }
-  if (tool === "create_reminder") {
-    if (result.status !== "created") {
-      return <div className="tool-card tool-card-warn"><AlertTriangle size={14} /> Reminder not set — {String(result.error || "unknown error")}</div>;
-    }
-    const r = (result.reminder || {}) as Record<string, unknown>;
-    const what = r.kind === "water" ? `${Math.round(Number(r.water_l) * 1000)} ml water` : `${String(r.food_name)} × ${String(r.quantity)}`;
-    const when = r.repeat === "daily" ? `every day at ${String(r.remind_time)}` : `${String(r.once_date)} at ${String(r.remind_time)}`;
-    return <div className="tool-card tool-card-logged"><AlarmClock size={14} /> Reminder set: <b>{what}</b> — {when}{r.auto_log ? " (auto-logs)" : ""}.</div>;
-  }
-  if (tool === "delete_reminder" && event.result.status === "deleted") {
-    return <div className="tool-card tool-card-logged"><AlarmClock size={14} /> Reminder deleted.</div>;
   }
   return null;
 }
