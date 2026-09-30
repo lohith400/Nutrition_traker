@@ -13,9 +13,9 @@ from datetime import datetime
 from openai import OpenAI
 
 try:
-    from backend import grocery, math_engine, memory_agent, menu_planner, places_finder, rag_resolver
+    from backend import grocery, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
 except ImportError:
-    import grocery, math_engine, memory_agent, menu_planner, places_finder, rag_resolver
+    import grocery, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
 
 MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -82,6 +82,8 @@ def _log_succeeded(events: list) -> bool:
         if e.get("tool") == "log_food" and status == "logged":
             return True
         if e.get("tool") in ("add_grocery_items", "remove_grocery_items") and status == "ok":
+            return True
+        if e.get("tool") == "set_reminder" and status == "created":
             return True
     return False
 
@@ -250,6 +252,34 @@ TOOLS = [
                     "area": {"type": "string", "description": "Optional area/city the user named, e.g. 'Indiranagar, Bengaluru'."},
                 },
                 "required": ["diet_filter"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_reminder",
+            "description": (
+                "Create a reminder that pings the user at a time to eat a food or drink water. Call it when the user "
+                "says things like 'remind me at 4 pm to drink water' or 'remind me to eat a boiled egg at 11:30'. "
+                "Convert the time to 24-hour HH:MM. Default repeat is 'daily' unless they say 'once' / 'today only'. "
+                "auto_log=true makes the app log the food/water automatically when the reminder fires; use false if "
+                "they only want a nudge."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["food", "water"]},
+                    "time": {"type": "string", "description": "24-hour HH:MM, e.g. '16:00'."},
+                    "repeat": {"type": "string", "enum": ["daily", "once"]},
+                    "food_name": {"type": "string", "description": "For kind='food': the food, e.g. 'boiled egg'."},
+                    "quantity": {"type": "number"},
+                    "unit": {"type": "string", "enum": ["serving", "grams"]},
+                    "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "snack", "dinner"]},
+                    "water_ml": {"type": "number", "description": "For kind='water': amount in ml (default 250)."},
+                    "auto_log": {"type": "boolean"},
+                },
+                "required": ["kind", "time"],
             },
         },
     },
@@ -476,7 +506,16 @@ def _tool_analyze_grocery_meal(meal_name, ingredients):
     return result
 
 
+def _tool_set_reminder(args):
+    return reminders.create_reminder(
+        args.get("kind", ""), args.get("time", ""), args.get("repeat") or "daily", args.get("food_name"),
+        args.get("quantity") or 1, args.get("unit") or "serving", args.get("meal_type"),
+        args.get("water_ml"), args.get("auto_log", True) is not False,
+    )
+
+
 TOOL_IMPL = {
+    "set_reminder": _tool_set_reminder,
     "add_grocery_items": lambda args: grocery.add_items(args.get("items") or []),
     "remove_grocery_items": lambda args: grocery.remove_items(args.get("items") or []),
     "get_grocery_list": lambda args: _tool_get_grocery_list(),
@@ -532,6 +571,9 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
         "clearly saying these are ideas that fit their remaining budget, not confirmed items on that restaurant's menu. "
         "If find_restaurants returns need_location, ask them to tap the location pin or tell you their area. "
         "If it returns not_configured or error, tell them plainly what is wrong.\n"
+        "REMINDERS: when the user asks to be reminded to eat or drink water at a time, call set_reminder and confirm the "
+        "time, what, and whether it auto-logs. Only say a reminder was set if set_reminder returned status 'created'; "
+        "if it returns an error, tell the user why.\n"
         "GROCERY LIST (separate from everything else): the user keeps a list of ingredients they have at home. "
         "(a) When they say they bought/have/want to add ingredients ('add 1 kg rice, 1 kg tomato'), call "
         "add_grocery_items and confirm what was added; when they say they used up or want to remove something, call "

@@ -1,6 +1,7 @@
 """NutriSync HTTP API."""
 import os
 import sys
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -19,11 +20,21 @@ for p in (DIR, ROOT):
         sys.path.insert(0, str(p))
 
 try:
-    from backend import grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver  # noqa: E402
+    from backend import grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
 except ImportError:
-    import grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver  # noqa: E402
+    import grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
 
-app = FastAPI(title="NutriSync API", version="0.4.0")
+@asynccontextmanager
+async def lifespan(_app):
+    # Background thread that fires food/water reminders when they are due.
+    reminders.start_scheduler()
+    try:
+        yield
+    finally:
+        reminders.stop_scheduler()
+
+
+app = FastAPI(title="NutriSync API", version="0.4.0", lifespan=lifespan)
 origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if x.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
@@ -116,6 +127,68 @@ def get_history(days: int = 14):
     `days` days (default 14) -- the browsable record of everything ever
     logged, not just today."""
     return {"days": memory_agent.get_logs_history(days)}
+
+
+class ReminderIn(BaseModel):
+    kind: Literal["food", "water"]
+    time: str
+    repeat: Literal["daily", "once"] = "daily"
+    food_name: str | None = None
+    quantity: float = 1
+    unit: str = "serving"
+    meal_type: str | None = None
+    water_ml: float | None = None
+    auto_log: bool = True
+
+
+class ReminderPatch(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/reminders")
+def get_reminders():
+    return {"reminders": reminders.list_reminders(), "channels": reminders.channel_status()}
+
+
+@app.post("/api/reminders")
+def add_reminder(payload: ReminderIn):
+    result = reminders.create_reminder(
+        payload.kind, payload.time, payload.repeat, payload.food_name, payload.quantity,
+        payload.unit, payload.meal_type, payload.water_ml, payload.auto_log,
+    )
+    if result.get("status") != "created":
+        raise HTTPException(status_code=422, detail=result.get("error", "Could not save the reminder."))
+    return result
+
+
+@app.post("/api/reminders/test-notification")
+def test_reminder_notification():
+    if not (reminders.channel_status()["ntfy"] or reminders.channel_status()["email"]):
+        raise HTTPException(status_code=400, detail="No phone or email channel is set up yet. Add NTFY_TOPIC (phone) or the SMTP settings to backend/.env and restart the backend.")
+    result = reminders.send_notifications("NutriSync test", "Notifications are working. Your reminders will reach you here.")
+    if not result["sent"]:
+        raise HTTPException(status_code=502, detail="Sending failed: " + "; ".join(f"{k}: {v}" for k, v in result["errors"].items()))
+    return result
+
+
+@app.get("/api/reminders/events")
+def reminder_events(since_id: int = 0, limit: int = 30):
+    """Recent fired reminders. The website polls this to show a toast while a tab is open."""
+    return {"events": reminders.list_events(since_id, min(max(limit, 1), 100))}
+
+
+@app.patch("/api/reminders/{reminder_id}")
+def toggle_reminder(reminder_id: int, payload: ReminderPatch):
+    if not reminders.set_enabled(reminder_id, payload.enabled):
+        raise HTTPException(status_code=404, detail="Reminder not found.")
+    return {"status": "ok"}
+
+
+@app.delete("/api/reminders/{reminder_id}")
+def delete_reminder(reminder_id: int):
+    if not reminders.delete_reminder(reminder_id):
+        raise HTTPException(status_code=404, detail="Reminder not found.")
+    return {"status": "deleted"}
 
 
 @app.get("/api/food-search")

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Camera, CheckCircle2, ExternalLink, MapPin, Mic, Plus, Search, Send, ShoppingCart, Sparkles, Square, Star, Trash2, Volume2, VolumeX, X } from "lucide-react";
+import { AlarmClock, AlertTriangle, Camera, CheckCircle2, ExternalLink, MapPin, Mic, Plus, Search, Send, ShoppingCart, Sparkles, Square, Star, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import Shell, { API } from "../components/Shell";
 import { useVoiceChat } from "../hooks/useVoiceChat";
 
@@ -102,6 +102,14 @@ type MealLine = { name: string; grams: number; matched_to?: string; calories: nu
 
 function ToolCard({ event }: { event: ToolEvent }) {
   const { tool, result } = event;
+  if (tool === "set_reminder") {
+    if (result.status !== "created") {
+      return <div className="tool-card tool-card-warn"><AlertTriangle size={14} /> Reminder not set — {String(result.error || "unknown error")}</div>;
+    }
+    const r = result.reminder as { kind: string; remind_time: string; repeat: string; food_name?: string | null; water_l?: number | null; auto_log?: boolean };
+    const what = r.kind === "water" ? `Drink ${Math.round((r.water_l || 0) * 1000)} ml water` : String(r.food_name);
+    return <div className="tool-card tool-card-logged"><AlarmClock size={14} /> Reminder set: {what} at {r.remind_time} · {r.repeat === "daily" ? "every day" : "once"}{r.auto_log ? " · auto-logs" : ""}</div>;
+  }
   if (tool === "add_grocery_items" || tool === "remove_grocery_items") {
     const adding = tool === "add_grocery_items";
     if (result.status !== "ok" || !Array.isArray(result.items)) {
