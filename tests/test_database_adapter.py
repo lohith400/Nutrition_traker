@@ -190,3 +190,237 @@ def test_reminders_under_turso_libsql(tmp_path, monkeypatch):
     events = reminders.list_events()
     assert len(events) >= 1
     assert events[0]["reminder_id"] == listed[0]["id"]
+
+
+def test_ensure_helpers_run_ddl_only_once(tmp_path, monkeypatch):
+    """(a) _ensure_* runs its DDL only once across several calls."""
+    from backend import grocery, memory_agent, reminders
+
+    # Reset module ensure flags for isolated testing
+    memory_agent._water_table_ensured = False
+    memory_agent._chat_table_ensured = False
+    reminders._reminders_tables_ensured = False
+    grocery._grocery_table_ensured = False
+
+    ddl_calls = []
+
+    class DummyConn:
+        def execute(self, sql, params=None):
+            ddl_calls.append(sql.strip())
+            return self
+
+        def commit(self):
+            pass
+
+    dummy = DummyConn()
+
+    # Call each ensure function 3 times
+    for _ in range(3):
+        memory_agent._ensure_water_table(dummy)
+        memory_agent._ensure_chat_table(dummy)
+        reminders._ensure_tables(dummy)
+        grocery._ensure_table(dummy)
+
+    # Count how many times CREATE TABLE was executed
+    creates = [sql for sql in ddl_calls if sql.upper().startswith("CREATE TABLE")]
+    # memory_agent._ensure_water_table: 1 table
+    # memory_agent._ensure_chat_table: 1 table
+    # reminders._ensure_tables: 2 tables (reminders, reminder_events)
+    # grocery._ensure_table: 1 table
+    # Total CREATE TABLE statements across all 3 iterations should be exactly 5 (1 + 1 + 2 + 1)!
+    assert len(creates) == 5
+
+
+def test_readonly_function_leaves_no_open_transaction(tmp_path, monkeypatch):
+    """(b) a read-only function leaves no open transaction (using NUTRISYNC_FORCE_LIBSQL=1)."""
+    from backend import db_setup, grocery, memory_agent, reminders
+
+    db_file = str(tmp_path / "readonly_test.db")
+    monkeypatch.setenv("NUTRISYNC_FORCE_LIBSQL", "1")
+    monkeypatch.setattr(db_setup, "DB_PATH", db_file)
+    monkeypatch.setattr(memory_agent, "DB_PATH", db_file)
+
+    db_setup.ensure_schema(db_file)
+
+    # Wrap get_db_connection to inspect connection lifecycle
+    closed_connections = []
+    original_get_conn = memory_agent._get_conn
+
+    def tracked_get_conn():
+        conn = original_get_conn()
+        orig_close = conn.close
+
+        def tracked_close():
+            closed_connections.append(conn)
+            orig_close()
+
+        conn.close = tracked_close
+        return conn
+
+    monkeypatch.setattr(memory_agent, "_get_conn", tracked_get_conn)
+    monkeypatch.setattr(reminders, "_get_conn", tracked_get_conn)
+
+    # Call read-only functions
+    memory_agent.get_user_profile()
+    memory_agent.get_todays_water()
+    memory_agent.get_active_patterns()
+    reminders.list_reminders()
+    grocery.list_items()
+
+    # Verify every opened connection was closed
+    assert len(closed_connections) >= 5
+    # Verify the database is not locked and can be opened for writing
+    write_conn = database.get_db_connection(db_file)
+    write_conn.execute("INSERT INTO daily_logs (log_date, log_time, food_name) VALUES ('2026-10-05', '12:00', 'Apple')")
+    write_conn.commit()
+    write_conn.close()
+
+
+def test_detect_patterns_closes_connection_on_error(tmp_path, monkeypatch):
+    """(c) detect_patterns closes the connection even if a query raises."""
+    from backend import db_setup, memory_agent
+
+    db_file = str(tmp_path / "detect_err.db")
+    monkeypatch.setenv("NUTRISYNC_FORCE_LIBSQL", "1")
+    monkeypatch.setattr(db_setup, "DB_PATH", db_file)
+    monkeypatch.setattr(memory_agent, "DB_PATH", db_file)
+
+    db_setup.ensure_schema(db_file)
+
+    conn = database.get_db_connection(db_file)
+    conn.execute("INSERT INTO user_profile (id, name, target_calories) VALUES (1, 'Test', 2000)")
+    conn.commit()
+
+    closed = []
+    orig_close = conn.close
+
+    def tracking_close():
+        closed.append(True)
+        orig_close()
+
+    conn.close = tracking_close
+
+    # Make execute raise on the pattern query
+    orig_execute = conn.execute
+
+    def failing_execute(sql, params=None):
+        if "user_profile" in sql:
+            return orig_execute(sql, params)
+        raise RuntimeError("Simulated DB query error during pattern detection")
+
+    conn.execute = failing_execute
+    monkeypatch.setattr(memory_agent, "_get_conn", lambda: conn)
+
+    with pytest.raises(RuntimeError, match="Simulated DB query error"):
+        memory_agent.detect_patterns()
+
+    assert len(closed) == 1, "Connection must be closed even when a query raises an exception"
+
+
+def test_get_patterns_twice_does_not_write(tmp_path, monkeypatch):
+    """(d) GET /api/patterns twice does not write the second time (or at all)."""
+    from fastapi.testclient import TestClient
+    from backend import app as app_module, db_setup, memory_agent
+
+    db_file = str(tmp_path / "patterns_test.db")
+    monkeypatch.setenv("NUTRISYNC_FORCE_LIBSQL", "1")
+    monkeypatch.setattr(db_setup, "DB_PATH", db_file)
+    monkeypatch.setattr(memory_agent, "DB_PATH", db_file)
+
+    db_setup.ensure_schema(db_file)
+
+    writes = []
+    orig_get_conn = memory_agent._get_conn
+
+    def spy_get_conn():
+        conn = orig_get_conn()
+        orig_execute = conn.execute
+
+        def spy_execute(sql, params=None):
+            first = (sql or "").strip().split()[0].upper()
+            if first in ("INSERT", "UPDATE", "DELETE", "REPLACE"):
+                writes.append(sql)
+            return orig_execute(sql, params)
+
+        conn.execute = spy_execute
+        return conn
+
+    monkeypatch.setattr(memory_agent, "_get_conn", spy_get_conn)
+
+    client = TestClient(app_module.app)
+
+    # First call
+    writes_before_1 = len(writes)
+    res1 = client.get("/api/patterns")
+    assert res1.status_code == 200
+    writes_after_1 = len(writes)
+
+    # Second call
+    res2 = client.get("/api/patterns")
+    assert res2.status_code == 200
+    writes_after_2 = len(writes)
+
+    # Neither call should perform any write operations
+    assert writes_after_1 - writes_before_1 == 0
+    assert writes_after_2 - writes_after_1 == 0
+
+
+def test_retry_logic_on_idle_stream_error(tmp_path, monkeypatch):
+    """(e) retry logic with a fake connection that fails once with the idle error."""
+    idle_err = ValueError("Hrana: stream error: SQLite error: interactive transaction was rolled back because the stream was idle for too long; retry the transaction, code: SQLITE_BUSY")
+
+    attempts = {"SELECT": 0, "INSERT": 0}
+
+    class MockRawCursor:
+        description = [("col",)]
+
+        def execute(self, sql, params=None):
+            if sql.startswith("SELECT"):
+                attempts["SELECT"] += 1
+                if attempts["SELECT"] == 1:
+                    raise idle_err
+                return self
+            if sql.startswith("INSERT INTO daily_logs"):
+                attempts["INSERT"] += 1
+                raise idle_err
+            return self
+
+        def fetchone(self):
+            return (42,)
+
+        def fetchall(self):
+            return [(42,)]
+
+    class MockRawConn:
+        def cursor(self):
+            return MockRawCursor()
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    reopened = []
+
+    def fake_opener():
+        reopened.append(True)
+        return MockRawConn()
+
+    raw = MockRawConn()
+    conn = database.LibsqlConnection(raw, opener=fake_opener)
+
+    # 1. Retryable read statement succeeds on retry
+    row = conn.execute("SELECT 42").fetchone()
+    assert row[0] == 42
+    assert attempts["SELECT"] == 2
+    assert len(reopened) == 1
+
+    # 2. Non-retryable statement (plain INSERT) is NOT retried and raises immediately
+    with pytest.raises(ValueError, match="idle for too long"):
+        conn.execute("INSERT INTO daily_logs (log_date) VALUES ('2026-10-05')")
+    assert attempts["INSERT"] == 1
+
