@@ -19,7 +19,7 @@ This guide covers running NutriSync with Docker locally, setting up continuous d
 2. **Configure environment (optional for AI Coach)**:
    ```bash
    cp backend/.env.example backend/.env
-   # Add your OPENROUTER_API_KEY in backend/.env if you want AI coach features
+   # Add your ONE of OPENROUTER_API_KEY / GEMINI_API_KEY / DEEPSEEK_API_KEY in backend/.env if you want AI coach features
    ```
 
 3. **Start the containers**:

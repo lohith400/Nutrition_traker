@@ -44,6 +44,7 @@ frontend/.next/
 out/
 .turbo/
 next-env.d.ts.bak
+*.tsbuildinfo
 
 # =========================
 # Environment variables & secrets
@@ -77,3 +78,4 @@ Thumbs.db
 # =========================
 *.log
 npm-debug.log*
+*.zip

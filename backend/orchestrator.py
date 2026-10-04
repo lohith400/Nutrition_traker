@@ -10,16 +10,13 @@ import os
 import re
 from datetime import datetime
 
-from openai import OpenAI
-
 try:
-    from backend import grocery, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
+    from backend import grocery, llm_config, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
 except ImportError:
-    import grocery, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
+    import grocery, llm_config, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
 
-MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
-API_KEY = os.getenv("OPENROUTER_API_KEY")
-client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY) if API_KEY else None
+# Supports OpenRouter, Gemini and DeepSeek -- fill any ONE key in backend/.env (see llm_config.py).
+client, MODEL, PROVIDER = llm_config.build_client()
 
 
 def tool_save_onboarding(name, age, sex, height_cm, current_weight_kg, target_weight_kg, goal, activity_level,
@@ -115,7 +112,7 @@ def interact(user_message: str) -> str:
     """Kept for backward compatibility with any caller that only wants a
     plain text reply with no tool-calling."""
     if client is None:
-        raise RuntimeError("OPENROUTER_API_KEY is not configured")
+        raise RuntimeError("No AI key configured (set OPENROUTER_API_KEY, GEMINI_API_KEY or DEEPSEEK_API_KEY)")
     context = _context()
     system = (
         "You are NutriSync India, a concise and supportive nutrition coach. "
@@ -123,7 +120,8 @@ def interact(user_message: str) -> str:
         "Do not diagnose medical conditions. Encourage professional advice for medical questions. "
         f"Live context:\n{json.dumps(context, default=str)}"
     )
-    response = client.chat.completions.create(
+    response = llm_config.create_completion(
+        client,
         model=MODEL,
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user_message}],
         temperature=0.3,
@@ -529,9 +527,19 @@ TOOL_IMPL = {
 MAX_TOOL_ROUNDS = 5
 
 
+def _tool_call_dict(tc) -> dict:
+    """Assistant tool call as sent back to the API. Newer Gemini models attach an opaque
+    `extra_content` (thought signature) that must be echoed back or the next call is rejected."""
+    entry = {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+    extra = (getattr(tc, "model_extra", None) or {}).get("extra_content")
+    if extra:
+        entry["extra_content"] = extra
+    return entry
+
+
 def chat_with_tools(user_message: str, history: list | None = None, image: str | None = None,
                     location: dict | None = None) -> dict:
-    """Runs a bounded tool-calling loop against OpenRouter.
+    """Runs a bounded tool-calling loop against the configured LLM provider.
 
     `history` is the prior turns as stored by memory_agent.get_chat_history()
     (role/content dicts). Returns {"reply": str, "tool_events": [...]}, where
@@ -539,7 +547,7 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
     frontend can render a "found in database" / "logged" card inline.
     """
     if client is None:
-        raise RuntimeError("OPENROUTER_API_KEY is not configured")
+        raise RuntimeError("No AI key configured (set OPENROUTER_API_KEY, GEMINI_API_KEY or DEEPSEEK_API_KEY)")
 
     context = _context()
     system = (
@@ -634,7 +642,8 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
     tool_events = []
     nudged = False
     for _ in range(MAX_TOOL_ROUNDS + 1):
-        response = client.chat.completions.create(
+        response = llm_config.create_completion(
+            client,
             model=MODEL,
             messages=messages,
             tools=TOOLS,
@@ -662,10 +671,7 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
         messages.append({
             "role": "assistant",
             "content": msg.content or "",
-            "tool_calls": [
-                {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                for tc in msg.tool_calls
-            ],
+            "tool_calls": [_tool_call_dict(tc) for tc in msg.tool_calls],
         })
 
         for tc in msg.tool_calls:

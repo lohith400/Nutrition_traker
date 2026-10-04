@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { ArrowUpRight, Droplets, Flame, Plus, Sparkles, Target, X, Zap } from "lucide-react";
 import Shell from "./components/Shell";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 type Profile = { status?: string; name?: string; target_calories?: number; target_protein_g?: number; target_carbs_g?: number; target_fat_g?: number; target_water_l?: number };
 type Pattern = { pattern_type: string; description: string; detected_on: string };
 type Budget = { consumed_calories: number; remaining_calories: number; consumed_protein_g: number; remaining_protein_g: number; consumed_carbs_g: number; remaining_carbs_g: number; target_calories: number; target_protein_g: number; target_carbs_g: number; target_water_l?: number; patterns?: Pattern[] };

@@ -23,6 +23,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # -----------------------------------------------------------------------------
 FROM python:3.12.9-slim-bookworm AS runner
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
 ARG BUILD_DATE
 ARG VCS_REF
 ARG VERSION=0.3.0
@@ -67,6 +71,6 @@ VOLUME ["/data"]
 EXPOSE 8000
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').getcode() == 200 else 1)"
+    CMD python -c "import os, urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('PORT', '8000')).getcode() == 200 else 1)"
 
 ENTRYPOINT ["/app/entrypoint.sh"]

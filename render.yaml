@@ -1,0 +1,31 @@
+# Render "Blueprint" for the NutriSync backend (free plan, no card).
+# Render dashboard -> New -> Blueprint -> pick this repo. Secrets marked sync:false are asked for once.
+services:
+  - type: web
+    name: nutrisync-api
+    runtime: docker
+    plan: free
+    region: singapore          # closest free region to India
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: TZ
+        value: Asia/Kolkata
+      - key: TURSO_DATABASE_URL     # libsql://<db>-<org>.turso.io
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: OPENROUTER_API_KEY     # or GEMINI_API_KEY / DEEPSEEK_API_KEY (fill only one)
+        sync: false
+      - key: ACCESS_KEY             # your own long random password for the app
+        sync: false
+      - key: NTFY_TOPIC             # optional: phone reminders
+        sync: false
+      - key: CORS_ORIGINS           # your Vercel URL, e.g. https://nutrisync.vercel.app
+        sync: false
+      - key: CORS_ORIGIN_REGEX
+        value: https://.*\.vercel\.app

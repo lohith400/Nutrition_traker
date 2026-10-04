@@ -26,8 +26,10 @@ import openpyxl
 
 try:
     from backend import food_quality
+    from backend.database import get_db_connection
 except ImportError:  # run as a script
     import food_quality
+    from database import get_db_connection
 
 _DEFAULT_DB = (
     os.path.join(os.path.dirname(__file__), "..", "nutrisync.db")
@@ -124,6 +126,57 @@ CREATE TABLE IF NOT EXISTS user_facts (
     fact_value  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS water_logs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_date    TEXT NOT NULL,
+    log_time    TEXT NOT NULL,
+    amount_l    REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    role        TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    timestamp   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS reminders (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT NOT NULL,
+    remind_time     TEXT NOT NULL,
+    repeat          TEXT NOT NULL DEFAULT 'daily',
+    once_date       TEXT,
+    food_name       TEXT,
+    quantity        REAL,
+    unit            TEXT DEFAULT 'serving',
+    meal_type       TEXT,
+    water_l         REAL,
+    auto_log        INTEGER NOT NULL DEFAULT 1,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    last_fired_date TEXT,
+    created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS reminder_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    reminder_id INTEGER,
+    fired_at    TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    message     TEXT NOT NULL,
+    logged      INTEGER NOT NULL DEFAULT 0,
+    channels    TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS grocery_items (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_name   TEXT NOT NULL,
+    quantity    REAL,
+    unit        TEXT,
+    category    TEXT,
+    checked     INTEGER DEFAULT 0,
+    created_at  TEXT NOT NULL
+);
 """
 
 # Columns added after the first release. (table, column, DDL type)
@@ -173,7 +226,7 @@ def rebuild_food_preferences(conn) -> None:
 def ensure_schema(db_path=None) -> None:
     """Create missing tables, add missing columns, dedupe patterns. Never drops data."""
     path = db_path or DB_PATH
-    conn = sqlite3.connect(path)
+    conn = get_db_connection(path)
     conn.executescript(SCHEMA)
     for table, column, ddl in MIGRATIONS:
         if column not in _columns(conn, table):
@@ -209,54 +262,75 @@ def load_foods(conn) -> int:
     rows = ws.iter_rows(values_only=True)
     header = next(rows)
     col = {name: i for i, name in enumerate(header)}
-    inserted = 0
+    batch = []
     for row in rows:
         if not row[col["food_name"]]:
             continue
-        conn.execute(
-            """INSERT OR REPLACE INTO food_items
-               (food_code, food_name, energy_kcal_100g, carb_g_100g, protein_g_100g,
-                fat_g_100g, fibre_g_100g, servings_unit, unit_serving_energy_kcal,
-                unit_serving_carb_g, unit_serving_protein_g, unit_serving_fat_g,
-                unit_serving_fibre_g)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                row[col["food_code"]], row[col["food_name"]], row[col["energy_kcal"]],
-                row[col["carb_g"]], row[col["protein_g"]], row[col["fat_g"]], row[col["fibre_g"]],
-                row[col["servings_unit"]], row[col["unit_serving_energy_kcal"]],
-                row[col["unit_serving_carb_g"]], row[col["unit_serving_protein_g"]],
-                row[col["unit_serving_fat_g"]], row[col["unit_serving_fibre_g"]],
-            ),
-        )
-        inserted += 1
-    return inserted
+        batch.append((
+            row[col["food_code"]], row[col["food_name"]], row[col["energy_kcal"]],
+            row[col["carb_g"]], row[col["protein_g"]], row[col["fat_g"]], row[col["fibre_g"]],
+            row[col["servings_unit"]], row[col["unit_serving_energy_kcal"]],
+            row[col["unit_serving_carb_g"]], row[col["unit_serving_protein_g"]],
+            row[col["unit_serving_fat_g"]], row[col["unit_serving_fibre_g"]],
+        ))
+    conn.executemany(
+        """INSERT OR REPLACE INTO food_items
+           (food_code, food_name, energy_kcal_100g, carb_g_100g, protein_g_100g,
+            fat_g_100g, fibre_g_100g, servings_unit, unit_serving_energy_kcal,
+            unit_serving_carb_g, unit_serving_protein_g, unit_serving_fat_g,
+            unit_serving_fibre_g)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        batch,
+    )
+    return len(batch)
+
+
+def seed_if_needed() -> None:
+    """Fast startup path (used by the Docker entrypoint): create missing tables and load the
+    food table only when it is empty. Never touches your logs / profile / chat history, so it
+    is safe to run on every boot -- including against Turso."""
+    ensure_schema(DB_PATH)
+    conn = get_db_connection(DB_PATH)
+    count = conn.execute("SELECT COUNT(*) FROM food_items").fetchone()[0]
+    if count == 0:
+        inserted = load_foods(conn)
+        refresh_food_quality(conn)
+        conn.commit()
+        print(f"Seeded {inserted} foods.")
+    else:
+        print(f"Database ready ({count} foods already loaded, user data untouched).")
+    conn.close()
 
 
 def build_database(reset_user_data: bool = False) -> None:
     """Create/upgrade the DB and (re)load the food table. User data is kept
     unless reset_user_data=True."""
     if reset_user_data:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection(DB_PATH)
         conn.executescript(
             "DROP TABLE IF EXISTS user_profile; DROP TABLE IF EXISTS daily_logs; "
             "DROP TABLE IF EXISTS detected_patterns; DROP TABLE IF EXISTS food_preferences; "
             "DROP TABLE IF EXISTS user_facts; DROP TABLE IF EXISTS chat_messages; "
-            "DROP TABLE IF EXISTS water_logs;"
+            "DROP TABLE IF EXISTS water_logs; DROP TABLE IF EXISTS reminders; "
+            "DROP TABLE IF EXISTS reminder_events; DROP TABLE IF EXISTS grocery_items;"
         )
         conn.commit()
         conn.close()
 
     ensure_schema(DB_PATH)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection(DB_PATH)
     inserted = load_foods(conn)
     refresh_food_quality(conn)
     conn.commit()
     graded = dict(conn.execute("SELECT quality, COUNT(*) FROM food_items GROUP BY quality").fetchall())
     conn.close()
-    print(f"Database ready at {DB_PATH} -- {inserted} foods loaded. Data quality: {graded}")
+    print(f"Database ready ({'Turso' if os.getenv('TURSO_DATABASE_URL') else DB_PATH}) -- {inserted} foods loaded. Data quality: {graded}")
 
 
 if __name__ == "__main__":
+    if "--if-needed" in sys.argv:
+        seed_if_needed()
+        sys.exit(0)
     if "--reset" in sys.argv:
         confirm = input("This DELETES all logged meals, profile and chat history. Type 'yes' to continue: ")
         if confirm.strip().lower() != "yes":

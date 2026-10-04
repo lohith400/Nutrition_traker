@@ -18,7 +18,8 @@ for p in (BACKEND_DIR, ROOT):
 def test_client():
     """Create a temporary test database and return a FastAPI TestClient."""
     # Ensure network calls fail if attempted
-    os.environ["OPENROUTER_API_KEY"] = ""
+    for var in ("OPENROUTER_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "LLM_PROVIDER", "LLM_MODEL"):
+        os.environ[var] = ""
     os.environ["NUTRISYNC_NO_SCHEDULER"] = "1"  # tests drive reminders.run_due() by hand
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp_file:
@@ -54,7 +55,10 @@ def test_client():
 def test_health_returns_ok(test_client):
     res = test_client.get("/health")
     assert res.status_code == 200
-    assert res.json() == {"status": "ok", "service": "NutriSync API"}
+    body = res.json()
+    assert body["status"] == "ok"
+    assert body["service"] == "NutriSync API"
+    assert "server_time" in body
 
 
 def test_overview_unonboarded_returns_error(test_client):
@@ -123,6 +127,89 @@ def test_chat_without_api_key_returns_503(test_client):
     res = test_client.post("/api/chat", json={"message": "Hello coach"})
     assert res.status_code == 503
     assert "AI coach is not configured" in res.json()["detail"]
+
+
+def test_llm_each_single_key_works(monkeypatch):
+    """Only one of the three keys filled (others blank) -> that provider is used."""
+    from backend import llm_config
+    all_vars = ("OPENROUTER_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_MODEL", "GEMINI_MODEL",
+                "DEEPSEEK_MODEL", "LLM_PROVIDER", "LLM_MODEL")
+    cases = {
+        "OPENROUTER_API_KEY": ("openrouter", "openai/gpt-4o-mini", "openrouter.ai"),
+        "GEMINI_API_KEY": ("gemini", "auto", "generativelanguage.googleapis.com"),
+        "DEEPSEEK_API_KEY": ("deepseek", "deepseek-chat", "api.deepseek.com"),
+    }
+    for key_var, (provider, model, host) in cases.items():
+        for var in all_vars:
+            monkeypatch.setenv(var, "")  # blank, like an empty line in .env
+        monkeypatch.setenv(key_var, "test-key-123")
+        s = llm_config.resolve_settings()
+        assert s["provider"] == provider and s["model"] == model and host in s["base_url"]
+        client, m, p = llm_config.build_client()
+        assert client is not None and m == model and p == provider
+
+    for var in all_vars:
+        monkeypatch.setenv(var, "")
+    assert llm_config.build_client()[0] is None  # nothing filled -> not configured
+    monkeypatch.setenv("GEMINI_API_KEY", "your_gemini_api_key_here")  # untouched placeholder
+    assert llm_config.build_client()[0] is None
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "k2")
+    monkeypatch.setenv("LLM_PROVIDER", "deepseek")
+    assert llm_config.resolve_settings()["provider"] == "deepseek"
+    monkeypatch.setenv("LLM_PROVIDER", "")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-2.5-pro")
+    assert llm_config.resolve_settings()["model"] == "gemini-2.5-pro"
+
+
+def test_gemini_auto_picks_newest_and_survives_retired_model(monkeypatch):
+    """Gemini with no model set: newest Flash is chosen; a 404 'no longer available' falls back."""
+    from types import SimpleNamespace
+    from backend import llm_config
+
+    for var in ("OPENROUTER_API_KEY", "DEEPSEEK_API_KEY", "GEMINI_MODEL", "LLM_MODEL", "LLM_PROVIDER"):
+        monkeypatch.setenv(var, "")
+    monkeypatch.setenv("GEMINI_API_KEY", "AIzaFake")
+    _, model, provider = llm_config.build_client()
+    assert (provider, model) == ("gemini", "auto")
+
+    class NotFound(Exception):
+        status_code = 404
+
+    listed = ["models/gemini-2.5-flash", "models/gemini-3.8-flash", "models/gemini-3.8-flash-lite",
+              "models/gemini-3.8-pro", "models/gemini-3.8-flash-image", "models/text-embedding-004",
+              "models/gemini-2.5-flash-preview-tts", "models/gemini-flash-latest"]
+    calls = []
+
+    def create(**kw):
+        calls.append(kw["model"])
+        if kw["model"] == "gemini-3.8-flash":
+            raise NotFound("This model is no longer available to new users")
+        return SimpleNamespace(ok=kw["model"])
+
+    fake = SimpleNamespace(
+        models=SimpleNamespace(list=lambda: [SimpleNamespace(id=i) for i in listed]),
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+    )
+    # 1) newest flash is tried first, 404 -> falls back to the next candidate and remembers it
+    assert llm_config.create_completion(fake, model="auto", messages=[]).ok == "gemini-3.8-flash-lite"
+    assert calls[0] == "gemini-3.8-flash"
+    assert llm_config.create_completion(fake, model="auto", messages=[]).ok == "gemini-3.8-flash-lite"
+    assert calls[-1] == "gemini-3.8-flash-lite" and len(calls) == 3  # no re-probing once a model works
+
+    # 2) a user-pinned retired model also falls back instead of erroring
+    llm_config.build_client()
+    calls.clear()
+    assert llm_config.create_completion(fake, model="gemini-2.0-flash", messages=[]).ok
+    # 3) non-model errors (auth / quota) are NOT swallowed
+    class Auth(Exception):
+        status_code = 401
+    def bad(**kw):
+        raise Auth("invalid api key")
+    fake.chat.completions.create = bad
+    llm_config.build_client()
+    with pytest.raises(Auth):
+        llm_config.create_completion(fake, model="auto", messages=[])
 
 
 # ---------------------------------------------------------------------------

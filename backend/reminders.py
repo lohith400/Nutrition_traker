@@ -379,6 +379,8 @@ def _loop() -> None:
 
 def start_scheduler() -> None:
     global _thread
+    if os.getenv("NUTRISYNC_NO_SCHEDULER") == "1":
+        return
     if _thread and _thread.is_alive():
         return
     _stop.clear()

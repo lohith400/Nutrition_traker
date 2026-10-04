@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ChevronDown, Sparkles, TrendingUp } from "lucide-react";
 import Shell from "../components/Shell";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
 type MealRow = { meal_type: string; food_name: string; quantity: number; calories: number; protein_g: number; carbs_g: number; fat_g: number; log_time: string };
 type DayEntry = { date: string; meals: MealRow[]; total_calories: number; total_protein_g: number; total_carbs_g: number; total_fat_g: number };

@@ -17,6 +17,11 @@ calculated, and reasons about trends across stored history.
 """
 
 import sqlite3
+
+try:
+    from backend.database import get_db_connection
+except ImportError:  # run from inside backend/
+    from database import get_db_connection
 import os
 from datetime import datetime, timedelta
 
@@ -29,7 +34,7 @@ DB_PATH = os.getenv("NUTRISYNC_DB_PATH", _DEFAULT_DB)
 
 
 def _get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -398,6 +403,28 @@ def get_chat_history(limit: int = 500, date: str | None = None) -> list:
             "ORDER BY msg_id ASC LIMIT ?",
             (limit,),
         ).fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        item = dict(r)
+        item["tool_events"] = _json.loads(item["tool_events"]) if item.get("tool_events") else []
+        out.append(item)
+    return out
+
+
+def get_recent_history(limit: int = 20) -> list:
+    """The last `limit` chat turns (oldest first), across days -- this is what the coach
+    receives on every request so it never loses context, even right after midnight or a
+    server restart. Stored in `chat_messages` (Turso in production)."""
+    import json as _json
+    conn = _get_conn()
+    _ensure_chat_table(conn)
+    rows = conn.execute(
+        "SELECT role, content, tool_events, created_at FROM ("
+        "  SELECT msg_id, role, content, tool_events, created_at FROM chat_messages "
+        "  ORDER BY msg_id DESC LIMIT ?) ORDER BY msg_id ASC",
+        (max(1, int(limit)),),
+    ).fetchall()
     conn.close()
     out = []
     for r in rows:

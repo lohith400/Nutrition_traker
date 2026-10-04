@@ -62,8 +62,10 @@ python backend/db_setup.py
 Edit `backend/.env` if you want coach chat:
 
 ```dotenv
-OPENROUTER_API_KEY=your-new-key
-OPENROUTER_MODEL=openai/gpt-4o-mini
+# Fill ONE key, leave the other two blank (OpenRouter, Gemini or DeepSeek)
+OPENROUTER_API_KEY=
+GEMINI_API_KEY=
+DEEPSEEK_API_KEY=
 CORS_ORIGINS=http://localhost:3000
 ```
 
@@ -82,7 +84,7 @@ curl http://localhost:8000/health
 Expected response:
 
 ```json
-{"status":"ok","service":"NutriSync API"}
+{"status":"ok","service":"NutriSync API","server_time":"2026-10-05 00:00:00"}
 ```
 
 ### Terminal 2: frontend
@@ -163,4 +165,4 @@ Phone/email notifications are free and optional. Set them in `backend/.env`, the
 - **Email:** set `SMTP_USER`, `SMTP_PASSWORD` (a Gmail *App Password*, needs 2-step verification) and optionally `NOTIFY_EMAIL_TO`.
 - **SMS/WhatsApp:** not included. There is no reliable free option for India (SMS needs DLT registration and paid credits).
 
-Reminders are fired by the backend, so the backend must be running at that time. A reminder more than 15 minutes late (server was off) is skipped, not logged. Set `TZ=Asia/Kolkata` for Docker/cloud so times match your clock.
+Reminders are fired by the backend, so the backend must be running at that time. A reminder more than 15 minutes late (server was off) is skipped, not logged. Set `TZ=Asia/Kolkata` for Docker/cloud so times match your clock (Linux/Docker/Render only; do NOT set `TZ` on Windows as Windows uses your system clock). Free cloud deployment instructions: see [docs/FREE_DEPLOYMENT.md](docs/FREE_DEPLOYMENT.md).
