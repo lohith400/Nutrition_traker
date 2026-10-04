@@ -30,12 +30,18 @@ for p in (DIR, ROOT):
         sys.path.insert(0, str(p))
 
 try:
-    from backend import grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
+    from backend import db_setup, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
 except ImportError:
-    import grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
+    import db_setup, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
 
 @asynccontextmanager
 async def lifespan(_app):
+    # Ensure all tables and schema exist once at startup (no DDL on normal requests)
+    try:
+        db_setup.ensure_schema()
+    except Exception as exc:
+        import logging
+        logging.getLogger("uvicorn.error").warning("db_setup.ensure_schema at startup: %s", exc)
     # Background thread that fires food/water reminders when they are due.
     reminders.start_scheduler()
     try:
@@ -146,11 +152,9 @@ def get_overview():
     water = memory_agent.get_todays_water()
     budget["consumed_water_l"] = water["consumed_water_l"]
     budget["remaining_water_l"] = round((budget.get("target_water_l") or 0) - water["consumed_water_l"], 2)
-    # Long-term memory runs here automatically: every overview fetch (i.e.
-    # every dashboard/chat load) re-checks recent history for patterns, so
-    # the coach's context always has the freshest findings without needing
-    # a separate scheduled job.
-    memory_agent.detect_patterns()
+    # Long-term memory runs here automatically: at most once every 10 minutes,
+    # so the coach's context has fresh findings without creating DB write contention.
+    memory_agent.maybe_detect_patterns(force=False)
     budget["patterns"] = memory_agent.get_active_patterns()["patterns"]
     return budget
 
@@ -258,6 +262,7 @@ def log_food(payload: FoodLogRequest):
     memory_agent.log_meal(payload.meal_type, match["matched_food_code"], macros["food_name"], payload.quantity,
                            macros["calories"], macros["protein_g"], macros["carbs_g"], macros["fat_g"],
                            unit=macros["unit"], serving_label=macros.get("serving_label"))
+    memory_agent.maybe_detect_patterns(force=True)
     return {"status": "logged", "matched_to": macros["food_name"], "match_confidence": match.get("confidence"), **macros, "budget": get_overview()}
 
 
@@ -277,7 +282,6 @@ def get_suggestions(meal_type: str | None = None, whole_day: bool = False):
 
 @app.get("/api/patterns")
 def get_patterns():
-    memory_agent.detect_patterns()
     return memory_agent.get_active_patterns()
 
 
