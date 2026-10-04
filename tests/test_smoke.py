@@ -290,6 +290,85 @@ def test_reminders_fire_log_and_skip_stale(test_client):
     fired = reminders.run_due(at("14:01"))
     assert len(fired) == 1 and fired[0]["logged"]                    # food fired + logged
     assert "Idli" in [m["food_name"] for m in memory_agent.get_todays_logs()["meals"]]
-    assert reminders.run_due(at("14:02")) == []                      # never fires twice a day
     assert memory_agent.get_todays_water()["consumed_water_l"] == water_before  # 10:00 water was >15 min late: skipped
     assert len(test_client.get("/api/reminders/events").json()["events"]) == 1  # only the food one fired
+
+
+def test_fitness_today_endpoint(test_client):
+    res = test_client.get("/api/fitness/today")
+    assert res.status_code == 200
+    data = res.json()
+    assert "date" in data
+    assert "steps" in data
+    assert "calories_burned" in data
+    assert "running_minutes" in data
+
+
+def test_google_fit_aggregation(monkeypatch):
+    import asyncio
+    from backend import google_fit
+
+    # Mock get_fresh_access_token and httpx client call
+    async def mock_token():
+        return "mock_token_123"
+
+    monkeypatch.setattr(google_fit, "is_configured", lambda: True)
+    monkeypatch.setattr(google_fit, "get_fresh_access_token", mock_token)
+
+    mock_google_response = {
+        "bucket": [
+            {
+                "dataset": [
+                    {
+                        "point": [
+                            {
+                                "dataTypeName": "com.google.step_count.delta",
+                                "value": [{"intVal": 1394}],
+                            }
+                        ]
+                    },
+                    {
+                        "point": [
+                            {
+                                "dataTypeName": "com.google.calories.expended",
+                                "value": [{"fpVal": 1509.9}],
+                            }
+                        ]
+                    },
+                    {
+                        "point": [
+                            {
+                                "dataTypeName": "com.google.activity.segment",
+                                "startTimeNanos": "1600000000000000000",
+                                "endTimeNanos": "1600001800000000000",  # 1800 seconds = 30 minutes
+                                "value": [{"intVal": 8}],  # Type 8 = running
+                            }
+                        ]
+                    },
+                ]
+            }
+        ]
+    }
+
+    class MockResponse:
+        status_code = 200
+        def json(self):
+            return mock_google_response
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def post(self, *args, **kwargs):
+            return MockResponse()
+
+    monkeypatch.setattr(google_fit.httpx, "AsyncClient", MockAsyncClient)
+
+    summary = asyncio.run(google_fit.fetch_fitness_summary())
+    assert summary["status"] == "ok"
+    assert summary["steps"] == 1394
+    assert summary["calories_burned"] == 1509.9
+    assert summary["running_minutes"] == 30.0

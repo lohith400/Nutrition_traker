@@ -30,9 +30,9 @@ for p in (DIR, ROOT):
         sys.path.insert(0, str(p))
 
 try:
-    from backend import db_setup, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
+    from backend import db_setup, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
 except ImportError:
-    import db_setup, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
+    import db_setup, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -181,6 +181,11 @@ def get_overview():
     memory_agent.maybe_detect_patterns(force=False)
     budget["patterns"] = memory_agent.get_active_patterns()["patterns"]
     return budget
+
+
+@app.get("/api/fitness/today")
+async def get_today_fitness():
+    return await google_fit.fetch_fitness_summary()
 
 
 @app.post("/api/log-water")

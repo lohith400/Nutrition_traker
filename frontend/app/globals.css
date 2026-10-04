@@ -321,3 +321,20 @@ section .chan-list+.rem-actions{margin-top:14px}
 .water-btn:hover{background:#e0f2fe;border-color:#38bdf8;transform:translateY(-1px);color:#0369a1}
 .water-btn:active{transform:translateY(0)}
 .water-btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* ---------- Google Fit & Activity Tracking ---------- */
+.stat-icon.emerald{background:#e3f5ec;color:#1e7e4f}
+.stat-icon.purple{background:#f1ecf9;color:#6b3bb8}
+.stat-icon.orange{background:#faebd7;color:#c25e00}
+.progress-fill.emerald{background:#289c62}
+.progress-fill.purple{background:#794ac8}
+.progress-fill.orange{background:#d97706}
+
+.fit-header-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.fit-header-badge.ok{background:#e7f5ed;color:#1e744a;border:1px solid #bce6cd}
+.fit-header-badge.warning{background:#fdf7e7;color:#966200;border:1px solid #fae6b2}
+.fit-header-badge.neutral{background:#f0eee9;color:#6b6e68;border:1px solid #e1ded6}
+.fit-badge-dot{width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
+.fit-helper-banner{margin-top:14px;padding:12px 16px;background:#fefbf2;border:1px solid #fae6b2;border-radius:12px;font-size:11.5px;color:#855400;display:flex;align-items:flex-start;gap:10px;line-height:1.55}
+.fit-helper-banner b{color:#5c3a00}
+.fit-helper-banner code{background:#f6eed2;padding:2px 6px;border-radius:4px;font-family:monospace;font-size:11px}
