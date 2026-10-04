@@ -282,11 +282,14 @@ class LibsqlConnection:
 
 def get_db_connection(path=None):
     """Open the database. `path` is only used for the local SQLite fallback."""
+    target_path = path or os.getenv("NUTRISYNC_DB_PATH") or DEFAULT_DB_PATH
     if os.getenv("NUTRISYNC_FORCE_LIBSQL") == "1":  # test hook: exercise the wrapper on a local file
-        opener = lambda: _import_libsql().connect(path or DEFAULT_DB_PATH)
+        opener = lambda: _import_libsql().connect(target_path)
         return LibsqlConnection(opener(), opener=opener)
     if turso_enabled():
         opener = lambda: _import_libsql().connect(_env("TURSO_DATABASE_URL"), auth_token=_env("TURSO_AUTH_TOKEN"))
         return LibsqlConnection(opener(), opener=opener)
-    return sqlite3.connect(path or DEFAULT_DB_PATH)
+    conn = sqlite3.connect(target_path)
+    conn.row_factory = sqlite3.Row
+    return conn
 

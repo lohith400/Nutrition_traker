@@ -7,6 +7,7 @@ import {
   AlarmClock,
   Bell,
   ChevronRight,
+  HeartPulse,
   Home,
   Leaf,
   Menu,
@@ -19,7 +20,7 @@ import {
 
 export const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
-export type NavKey = "overview" | "log" | "plans" | "grocery" | "reminders" | "progress" | "chat" | "profile";
+export type NavKey = "overview" | "log" | "plans" | "grocery" | "reminders" | "progress" | "chat" | "profile" | "health";
 
 const NAV: { key: NavKey; label: string; href: string; Icon: typeof Home }[] = [
   { key: "overview", label: "Overview", href: "/", Icon: Home },
@@ -28,6 +29,7 @@ const NAV: { key: NavKey; label: string; href: string; Icon: typeof Home }[] = [
   { key: "grocery", label: "Grocery", href: "/grocery", Icon: ShoppingCart },
   { key: "reminders", label: "Reminders", href: "/reminders", Icon: AlarmClock },
   { key: "progress", label: "Progress", href: "/progress", Icon: Activity },
+  { key: "health", label: "Health", href: "/health", Icon: HeartPulse },
 ];
 
 type Pattern = { pattern_type: string; description: string; detected_on: string };

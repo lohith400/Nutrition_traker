@@ -42,6 +42,11 @@ async def lifespan(_app):
     except Exception as exc:
         import logging
         logging.getLogger("uvicorn.error").warning("db_setup.ensure_schema at startup: %s", exc)
+    try:
+        await google_fit.sync_today_fitness()
+    except Exception as exc:
+        import logging
+        logging.getLogger("uvicorn.error").warning("google_fit.sync_today_fitness at startup: %s", exc)
     # Background thread that fires food/water reminders when they are due.
     reminders.start_scheduler()
     try:
@@ -185,7 +190,12 @@ def get_overview():
 
 @app.get("/api/fitness/today")
 async def get_today_fitness():
-    return await google_fit.fetch_fitness_summary()
+    return await google_fit.sync_today_fitness()
+
+
+@app.get("/api/fitness/history")
+def get_fitness_history(days: int = 7):
+    return {"days": google_fit.get_fitness_history(days)}
 
 
 @app.post("/api/log-water")

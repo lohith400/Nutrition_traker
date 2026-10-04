@@ -26,9 +26,9 @@ from datetime import datetime, timedelta
 from email.message import EmailMessage
 
 try:
-    from backend import math_engine, memory_agent, rag_resolver
+    from backend import google_fit, math_engine, memory_agent, rag_resolver
 except ImportError:  # running from inside backend/
-    import math_engine, memory_agent, rag_resolver
+    import google_fit, math_engine, memory_agent, rag_resolver
 
 # A reminder that is more than this many minutes late (server was off / asleep)
 # is skipped instead of fired, so restarting at 9pm never logs your breakfast.
@@ -415,11 +415,21 @@ _thread: threading.Thread | None = None
 
 
 def _loop() -> None:
+    ticks = 0
     while not _stop.is_set():
         try:
             run_due()
         except Exception as exc:
             print(f"[reminders] scheduler error: {exc}")
+
+        # Periodic Google Fit sync every ~15 minutes (POLL_SECONDS is 15s; 60 ticks = 900s = 15m)
+        ticks += 1
+        if ticks % 60 == 0:
+            try:
+                google_fit.sync_today_fitness_sync()
+            except Exception as exc:
+                print(f"[fitness] background sync error: {exc}")
+
         _stop.wait(POLL_SECONDS)
 
 

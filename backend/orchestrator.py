@@ -11,9 +11,9 @@ import re
 from datetime import datetime
 
 try:
-    from backend import grocery, llm_config, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
+    from backend import google_fit, grocery, llm_config, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
 except ImportError:
-    import grocery, llm_config, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
+    import google_fit, grocery, llm_config, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
 
 # Supports OpenRouter, Gemini and DeepSeek -- fill any ONE key in backend/.env (see llm_config.py).
 client, MODEL, PROVIDER = llm_config.build_client()
@@ -104,7 +104,24 @@ def _context():
     memory_agent.maybe_detect_patterns(force=False)
     patterns = memory_agent.get_active_patterns()["patterns"]
     facts = memory_agent.get_user_facts()
-    return {"profile": profile, "budget": budget, "meals": meals, "detected_patterns": patterns, "known_facts": facts}
+    today_fitness = google_fit.get_today_stored_fitness(today)
+    return {
+        "profile": profile,
+        "budget": budget,
+        "meals": meals,
+        "detected_patterns": patterns,
+        "known_facts": facts,
+        "daily_fitness": today_fitness or {
+            "log_date": today,
+            "steps": 0,
+            "calories_burned": 0.0,
+            "running_minutes": 0.0,
+            "distance_km": 0.0,
+            "active_minutes": 0.0,
+            "source": "google_fit",
+            "synced_at": "",
+        },
+    }
 
 
 def interact(user_message: str) -> str:
@@ -404,6 +421,25 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_fitness_summary",
+            "description": (
+                "Get the user's recorded physical activity (steps, calories burned, running/active minutes, distance) "
+                "from Google Fit. Can return today's stats (days=1) or recent daily history up to 7 days."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "description": "Number of days of activity history to inspect (1 to 7). Defaults to 1 (today only).",
+                    }
+                },
+            },
+        },
+    },
 ]
 
 
@@ -560,6 +596,31 @@ def _tool_set_reminder(args):
     )
 
 
+def _tool_get_fitness_summary(days=1):
+    days = max(1, min(int(days or 1), 7))
+    today = datetime.now().strftime("%Y-%m-%d")
+    if days == 1:
+        stored = google_fit.get_today_stored_fitness(today)
+        if stored:
+            return {"status": "ok", "days": [stored], "today": stored}
+        return {
+            "status": "ok",
+            "days": [],
+            "today": {
+                "log_date": today,
+                "steps": 0,
+                "calories_burned": 0.0,
+                "running_minutes": 0.0,
+                "distance_km": 0.0,
+                "active_minutes": 0.0,
+                "source": "google_fit",
+            },
+            "message": "No fitness activity recorded for today yet. Google Fit may be syncing or awaiting configuration.",
+        }
+    history = google_fit.get_fitness_history(days)
+    return {"status": "ok", "days": history, "count": len(history)}
+
+
 TOOL_IMPL = {
     "set_reminder": _tool_set_reminder,
     "add_grocery_items": lambda args: grocery.add_items(args.get("items") or []),
@@ -571,6 +632,7 @@ TOOL_IMPL = {
     "log_water": lambda args: _tool_log_water(args.get("amount_l") or 0),
     "get_today_summary": lambda args: _context(),
     "suggest_meal": lambda args: _tool_suggest_meal(args.get("meal_type"), bool(args.get("whole_day"))),
+    "get_fitness_summary": lambda args: _tool_get_fitness_summary(args.get("days", 1)),
 }
 
 MAX_TOOL_ROUNDS = 5
@@ -659,10 +721,20 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
         "If detected_patterns in the context is non-empty, weave a brief, supportive mention of the "
         "most relevant one into your reply where it fits naturally (e.g. noticing low breakfast protein, "
         "or a favourite food) -- don't force it into every message.\n"
+        "PHYSICAL ACTIVITY & GOOGLE FIT:\n"
+        "- When steps, calories_burned, or active/running minutes are present in live context (daily_fitness) or from get_fitness_summary, "
+        "factor real activity into meal suggestions — e.g. a more active day with high calories_burned can justify a higher-calorie/protein "
+        "meal suggestion from suggest_meal; a very low-activity day is a prompt to gently suggest more movement, not a reason to invent food "
+        "advice outside what suggest_meal returns.\n"
+        "- The coach must NEVER adjust or override the stored target_calories / target_protein_g etc. from user_profile on its own — you may "
+        "only talk about activity context, and must still only ever name foods that suggest_meal / lookup_food actually returned, same rule as "
+        "the existing food-suggestion instructions.\n"
+        "- If get_fitness_summary or context shows Google Fit is not configured or steps are 0 all day, say so plainly rather than inventing numbers.\n"
+        "- Do not diagnose or give medical exercise advice beyond general, non-clinical encouragement; this app is not a doctor.\n"
         "Keep replies short (2-4 sentences) and conversational. Do not diagnose medical conditions; "
         "suggest professional advice for medical questions.\n"
         f"Live context (profile, remaining budget, meals already logged today, detected long-term "
-        f"patterns, known facts about the user):\n{json.dumps(context, default=str)}"
+        f"patterns, known facts about the user, today's daily_fitness):\n{json.dumps(context, default=str)}"
     )
 
     messages = [{"role": "system", "content": system}]

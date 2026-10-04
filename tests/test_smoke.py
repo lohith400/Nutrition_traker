@@ -33,13 +33,14 @@ def test_client():
     db_setup.build_database()
 
     # Re-bind DB_PATH on all backend modules
-    from backend import math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders
+    from backend import google_fit, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders
     from backend.app import app
 
     math_engine.DB_PATH = tmp_db_path
     memory_agent.DB_PATH = tmp_db_path
     menu_planner.DB_PATH = tmp_db_path
     rag_resolver.DB_PATH = tmp_db_path
+    google_fit.DB_PATH = tmp_db_path
     orchestrator.client = None
 
     client = TestClient(app)
@@ -372,3 +373,54 @@ def test_google_fit_aggregation(monkeypatch):
     assert summary["steps"] == 1394
     assert summary["calories_burned"] == 1509.9
     assert summary["running_minutes"] == 30.0
+
+
+def test_fitness_sync_and_history(test_client, monkeypatch):
+    import asyncio
+    from datetime import datetime, timedelta
+    from backend import google_fit
+
+    async def mock_summary(target_date=None):
+        return {
+            "status": "ok",
+            "configured": True,
+            "date": (target_date or datetime.now()).strftime("%Y-%m-%d"),
+            "steps": 8500,
+            "calories_burned": 520.0,
+            "running_minutes": 25.0,
+            "distance_km": 6.38,
+            "active_minutes": 25.0,
+        }
+
+    monkeypatch.setattr(google_fit, "fetch_fitness_summary", mock_summary)
+
+    # Sync today
+    synced = asyncio.run(google_fit.sync_today_fitness())
+    assert synced["status"] == "ok"
+    assert synced["steps"] == 8500
+
+    # Query endpoint
+    res = test_client.get("/api/fitness/today")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["steps"] == 8500
+    assert data["calories_burned"] == 520.0
+
+    # Query history
+    hist_res = test_client.get("/api/fitness/history?days=7")
+    assert hist_res.status_code == 200
+    hist = hist_res.json()
+    assert "days" in hist
+    assert len(hist["days"]) >= 1
+    assert any(d["steps"] == 8500 for d in hist["days"])
+
+
+def test_coach_fitness_tool_and_context(test_client):
+    from backend import orchestrator
+
+    ctx = orchestrator._context()
+    assert "daily_fitness" in ctx
+
+    tool_res = orchestrator.TOOL_IMPL["get_fitness_summary"]({"days": 1})
+    assert tool_res["status"] == "ok"
+    assert "today" in tool_res or "days" in tool_res

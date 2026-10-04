@@ -17,6 +17,12 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 FITNESS_URL = "https://fitness.googleapis.com/fitness/v1/users/me/dataset:aggregate"
 
 
+try:
+    from backend.database import get_db_connection
+except ImportError:
+    from database import get_db_connection
+
+
 def _clean(val: str | None) -> str:
     v = (val or "").strip().strip('"').strip("'").strip()
     return "" if v.lower().startswith("your_") else v
@@ -76,6 +82,8 @@ async def fetch_fitness_summary(target_date: datetime | None = None) -> dict:
             "steps": 0,
             "calories_burned": 0.0,
             "running_minutes": 0.0,
+            "distance_km": 0.0,
+            "active_minutes": 0.0,
             "message": "Google Fit credentials not set in backend/.env",
         }
 
@@ -135,6 +143,9 @@ async def fetch_fitness_summary(target_date: datetime | None = None) -> dict:
                                 end_ns = int(point.get("endTimeNanos", 0))
                                 running_minutes += (end_ns - start_ns) / (1e9 * 60)
 
+        distance_km = round(steps * 0.00075, 2)
+        active_minutes = round(running_minutes, 1)
+
         return {
             "status": "ok",
             "configured": True,
@@ -142,6 +153,8 @@ async def fetch_fitness_summary(target_date: datetime | None = None) -> dict:
             "steps": steps,
             "calories_burned": round(calories, 1),
             "running_minutes": round(running_minutes, 1),
+            "distance_km": distance_km,
+            "active_minutes": active_minutes,
         }
     except Exception as e:
         logger.warning("Google Fit query error: %s", e)
@@ -152,5 +165,128 @@ async def fetch_fitness_summary(target_date: datetime | None = None) -> dict:
             "steps": 0,
             "calories_burned": 0.0,
             "running_minutes": 0.0,
+            "distance_km": 0.0,
+            "active_minutes": 0.0,
             "error": str(e),
         }
+
+
+DB_PATH = None
+
+
+def _get_conn():
+    return get_db_connection(DB_PATH)
+
+
+async def sync_today_fitness(target_date: datetime | None = None) -> dict:
+    """
+    Fetches the latest summary for today and upserts into daily_fitness.
+    Ensures stored row and live Google Fit numbers stay synchronized.
+    """
+    summary = await fetch_fitness_summary(target_date)
+    dt_str = summary.get("date") or datetime.now().strftime("%Y-%m-%d")
+    steps = int(summary.get("steps") or 0)
+    calories = float(summary.get("calories_burned") or 0.0)
+    running_min = float(summary.get("running_minutes") or 0.0)
+    distance_km = summary.get("distance_km")
+    if distance_km is None and steps > 0:
+        distance_km = round(steps * 0.00075, 2)
+    active_min = summary.get("active_minutes") if summary.get("active_minutes") is not None else running_min
+    synced_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = _get_conn()
+    try:
+        if summary.get("status") == "ok":
+            conn.execute(
+                """INSERT INTO daily_fitness (
+                       log_date, steps, calories_burned, running_minutes,
+                       distance_km, active_minutes, source, synced_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, 'google_fit', ?)
+                   ON CONFLICT (log_date) DO UPDATE SET
+                       steps = excluded.steps,
+                       calories_burned = excluded.calories_burned,
+                       running_minutes = excluded.running_minutes,
+                       distance_km = excluded.distance_km,
+                       active_minutes = excluded.active_minutes,
+                       source = excluded.source,
+                       synced_at = excluded.synced_at""",
+                (dt_str, steps, calories, running_min, distance_km, active_min, synced_at),
+            )
+            conn.commit()
+            summary["synced_at"] = synced_at
+        else:
+            # If Google API returned an error or not configured, check if we have a stored row
+            row = conn.execute(
+                "SELECT * FROM daily_fitness WHERE log_date = ?", (dt_str,)
+            ).fetchone()
+            if row:
+                summary["stored_steps"] = row["steps"]
+                summary["stored_calories_burned"] = row["calories_burned"]
+                summary["stored_running_minutes"] = row["running_minutes"]
+                summary["distance_km"] = row["distance_km"]
+                summary["active_minutes"] = row["active_minutes"]
+                summary["synced_at"] = row["synced_at"]
+                # Keep steps/calories populated from stored data for UI continuity
+                if steps == 0 and row["steps"]:
+                    summary["steps"] = row["steps"]
+                    summary["calories_burned"] = row["calories_burned"]
+                    summary["running_minutes"] = row["running_minutes"]
+    except Exception as exc:
+        logger.warning("sync_today_fitness DB error: %s", exc)
+    finally:
+        conn.close()
+
+    return summary
+
+
+def sync_today_fitness_sync() -> dict:
+    """Synchronous caller for background thread / scheduler."""
+    import asyncio
+    try:
+        return asyncio.run(sync_today_fitness())
+    except Exception as exc:
+        logger.warning("sync_today_fitness_sync error: %s", exc)
+        return {"status": "error", "error": str(exc)}
+
+
+def get_fitness_history(days: int = 7) -> list[dict]:
+    """Returns daily_fitness rows for the last N days (default 7, cap 30), oldest first."""
+    num_days = max(1, min(int(days or 7), 30))
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            """SELECT log_date, steps, calories_burned, running_minutes,
+                      distance_km, active_minutes, source, synced_at
+               FROM (
+                   SELECT * FROM daily_fitness
+                   ORDER BY log_date DESC
+                   LIMIT ?
+               ) ORDER BY log_date ASC""",
+            (num_days,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as exc:
+        logger.warning("get_fitness_history error: %s", exc)
+        return []
+    finally:
+        conn.close()
+
+
+def get_today_stored_fitness(target_date: str | None = None) -> dict | None:
+    """Reads today's row from daily_fitness without hitting Google API."""
+    dt = target_date or datetime.now().strftime("%Y-%m-%d")
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            """SELECT log_date, steps, calories_burned, running_minutes,
+                      distance_km, active_minutes, source, synced_at
+               FROM daily_fitness WHERE log_date = ?""",
+            (dt,),
+        ).fetchone()
+        return dict(row) if row else None
+    except Exception as exc:
+        logger.warning("get_today_stored_fitness error: %s", exc)
+        return None
+    finally:
+        conn.close()
+

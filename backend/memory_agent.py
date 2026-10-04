@@ -382,6 +382,49 @@ def detect_patterns() -> dict:
                 else:
                     _deactivate_pattern(conn, "over_eating")
 
+            # Pattern 4: low_activity_week (average daily steps over last 7 days of daily_fitness below sedentary threshold)
+            try:
+                fitness_rows = conn.execute(
+                    """SELECT log_date, steps, calories_burned FROM daily_fitness
+                       WHERE log_date >= ? ORDER BY log_date DESC""",
+                    (seven_days_ago,),
+                ).fetchall()
+            except Exception:
+                fitness_rows = []
+
+            if len(fitness_rows) >= 3:
+                avg_steps = sum(r["steps"] or 0 for r in fitness_rows) / len(fitness_rows)
+                if avg_steps < 5000:
+                    desc = f"Average daily steps over the last {len(fitness_rows)} tracked days is {int(avg_steps):,} steps (below sedentary threshold of 5,000 steps)."
+                    _upsert_pattern(conn, "low_activity_week", desc)
+                    new_patterns.append(desc)
+                else:
+                    _deactivate_pattern(conn, "low_activity_week")
+            else:
+                _deactivate_pattern(conn, "low_activity_week")
+
+            # Pattern 5: active_day_undereating (on days with high calories_burned, intake was well under target_calories)
+            if target and fitness_rows and daily_totals:
+                cal_map = {r["log_date"]: r["cal"] for r in daily_totals}
+                active_under_count = 0
+                total_active_days = 0
+                for fr in fitness_rows:
+                    dt = fr["log_date"]
+                    burned = fr["calories_burned"] or 0
+                    steps = fr["steps"] or 0
+                    if (burned >= 400 or steps >= 8000) and dt in cal_map:
+                        total_active_days += 1
+                        if cal_map[dt] < target * 0.8:
+                            active_under_count += 1
+                if total_active_days >= 2 and active_under_count >= 2:
+                    desc = f"On {active_under_count} high-activity days recently, logged calorie intake was over 20% below target — remember to replenish energy and nutrients after workouts."
+                    _upsert_pattern(conn, "active_day_undereating", desc)
+                    new_patterns.append(desc)
+                else:
+                    _deactivate_pattern(conn, "active_day_undereating")
+            else:
+                _deactivate_pattern(conn, "active_day_undereating")
+
             conn.commit()
             return {"status": "checked", "new_patterns": new_patterns}
         except Exception:

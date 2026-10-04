@@ -159,6 +159,8 @@ a.avatar,.avatar-link{text-decoration:none;transition:box-shadow .15s ease}
 .bar{position:absolute;left:12%;right:12%;bottom:0;border-radius:5px 5px 2px 2px;background:var(--green)}
 .bar.over{background:var(--coral)}
 .bar.none{height:2px!important;background:var(--line);left:0;right:0}
+.bar.emerald-bar{background:#289c62}.bar.emerald-bar.over{background:#1e7e4f}
+.bar.orange-bar{background:#d97706}.bar.orange-bar.over{background:#b45309}
 .bar-col small{height:18px;line-height:18px;text-align:center;font-size:9px;color:var(--soft);white-space:nowrap}
 .progress-grid{margin-top:0}
 .progress-grid{grid-template-columns:1fr 1fr}

@@ -180,6 +180,17 @@ CREATE TABLE IF NOT EXISTS grocery_items (
     added_at   TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS daily_fitness (
+    log_date         TEXT PRIMARY KEY,
+    steps            INTEGER DEFAULT 0,
+    calories_burned  REAL DEFAULT 0,
+    running_minutes  REAL DEFAULT 0,
+    distance_km      REAL,
+    active_minutes   REAL,
+    source           TEXT DEFAULT 'google_fit',
+    synced_at        TEXT NOT NULL
+);
 """
 
 # Columns added after the first release. (table, column, DDL type)
