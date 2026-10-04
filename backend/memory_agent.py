@@ -54,6 +54,24 @@ def _get_conn():
     return conn
 
 
+_profile_photo_ensured = False
+_profile_photo_lock = threading.Lock()
+
+
+def _ensure_profile_photo_column(conn) -> None:
+    global _profile_photo_ensured
+    if _profile_photo_ensured:
+        return
+    with _profile_photo_lock:
+        if _profile_photo_ensured:
+            return
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(user_profile)").fetchall()}
+        if "photo_data" not in cols:
+            conn.execute("ALTER TABLE user_profile ADD COLUMN photo_data TEXT")
+            conn.commit()
+        _profile_photo_ensured = True
+
+
 # ---------- User profile ----------
 
 def save_user_profile(profile: dict) -> dict:
@@ -64,21 +82,39 @@ def save_user_profile(profile: dict) -> dict:
     """
     conn = _get_conn()
     try:
+        _ensure_profile_photo_column(conn)
         profile = {**profile, "diet": profile.get("diet") or "any"}
+        if "photo_data" not in profile:
+            cur = conn.execute("SELECT photo_data FROM user_profile WHERE id = 1").fetchone()
+            profile["photo_data"] = cur["photo_data"] if cur and "photo_data" in cur.keys() else None
         conn.execute(
             """INSERT OR REPLACE INTO user_profile
                (id, name, age, sex, height_cm, current_weight_kg, target_weight_kg,
                 goal, activity_level, allergies, medical_conditions, sleep_schedule,
                 diet, bmr_kcal, tdee_kcal, target_calories, target_protein_g,
-                target_carbs_g, target_fat_g, target_water_l, onboarded_at)
+                target_carbs_g, target_fat_g, target_water_l, onboarded_at, photo_data)
                VALUES (1, :name, :age, :sex, :height_cm, :current_weight_kg, :target_weight_kg,
                        :goal, :activity_level, :allergies, :medical_conditions, :sleep_schedule,
                        :diet, :bmr_kcal, :tdee_kcal, :target_calories, :target_protein_g,
-                       :target_carbs_g, :target_fat_g, :target_water_l, :onboarded_at)""",
+                       :target_carbs_g, :target_fat_g, :target_water_l, :onboarded_at, :photo_data)""",
             profile,
         )
         conn.commit()
         return {"status": "saved"}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def update_profile_photo(photo_data: str | None) -> dict:
+    conn = _get_conn()
+    try:
+        _ensure_profile_photo_column(conn)
+        conn.execute("UPDATE user_profile SET photo_data = ? WHERE id = 1", (photo_data,))
+        conn.commit()
+        return {"status": "ok", "photo_data": photo_data}
     except Exception:
         conn.rollback()
         raise

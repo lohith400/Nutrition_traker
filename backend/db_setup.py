@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS user_profile (
     target_carbs_g      REAL,
     target_fat_g        REAL,
     target_water_l      REAL,
-    onboarded_at        TEXT
+    onboarded_at        TEXT,
+    photo_data          TEXT
 );
 
 CREATE TABLE IF NOT EXISTS daily_logs (
@@ -190,6 +191,7 @@ MIGRATIONS = [
     ("daily_logs", "unit", "TEXT DEFAULT 'serving'"),
     ("daily_logs", "serving_label", "TEXT"),
     ("user_profile", "diet", "TEXT DEFAULT 'any'"),
+    ("user_profile", "photo_data", "TEXT"),
 ]
 
 

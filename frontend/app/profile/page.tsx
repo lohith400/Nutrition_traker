@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
-import { Pencil, Sparkles, X } from "lucide-react";
+import { FormEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { Camera, Pencil, Sparkles, Trash2, X } from "lucide-react";
 import Shell, { API } from "../components/Shell";
 
 type Profile = {
@@ -13,7 +13,28 @@ type Profile = {
   bmr_kcal?: number; tdee_kcal?: number;
   target_calories?: number; target_protein_g?: number; target_carbs_g?: number; target_fat_g?: number; target_water_l?: number;
   onboarded_at?: string;
+  photo_data?: string | null;
 };
+
+function processAvatarFile(file: File, maxSide = 512, quality = 0.85): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { URL.revokeObjectURL(url); reject(new Error("Could not process image")); return; }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Could not open image")); };
+    img.src = url;
+  });
+}
 
 const GOALS: Record<string, string> = { fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomp: "Recomposition", maintenance: "Maintenance" };
 const ACTIVITY: Record<string, string> = { sedentary: "Sedentary", casual: "Casual", gym: "Gym", bodybuilder: "Bodybuilder" };
@@ -54,12 +75,14 @@ export default function ProfilePage() {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<Form>(toForm(null));
   const [saving, setSaving] = useState(false);
+  const [updatingPhoto, setUpdatingPhoto] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     try {
-      const data: Profile = await fetch(`${API}/api/profile`).then(r => r.json());
+      const data: Profile = await fetch(`${API}/api/profile?_t=${Date.now()}`).then(r => r.json());
       setProfile(data);
       if (data.status === "not_onboarded") { setEditing(true); setForm(toForm(null)); }
     } catch {
@@ -68,6 +91,46 @@ export default function ProfilePage() {
       setLoaded(true);
     }
   }, []);
+
+  async function handlePhotoSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUpdatingPhoto(true);
+    setError("");
+    setNotice("");
+    try {
+      const dataUrl = await processAvatarFile(file);
+      const res = await fetch(`${API}/api/profile/photo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photo_data: dataUrl }),
+      });
+      if (!res.ok) throw new Error("Failed to save profile photo.");
+      await load();
+      setNotice("Profile photo updated.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not upload photo.");
+    } finally {
+      setUpdatingPhoto(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function removePhoto() {
+    setUpdatingPhoto(true);
+    setError("");
+    setNotice("");
+    try {
+      const res = await fetch(`${API}/api/profile/photo`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to remove profile photo.");
+      await load();
+      setNotice("Profile photo removed.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove photo.");
+    } finally {
+      setUpdatingPhoto(false);
+    }
+  }
 
   useEffect(() => { load(); }, [load]);
 
@@ -120,7 +183,30 @@ export default function ProfilePage() {
       <div className="page-wrap">
         <div className="hero-row">
           <div className="profile-head">
-            <div className="avatar avatar-lg">{initial}</div>
+            <div className="profile-avatar-wrap">
+              {profile?.photo_data ? (
+                <img src={profile.photo_data} alt={name || "Profile"} className="avatar-img avatar-lg" />
+              ) : (
+                <div className="avatar avatar-lg">{initial}</div>
+              )}
+              <button
+                type="button"
+                className="avatar-edit-badge"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={updatingPhoto}
+                title="Change profile photo"
+                aria-label="Upload profile photo"
+              >
+                <Camera size={13} />
+              </button>
+            </div>
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: "none" }}
+              accept="image/*"
+              onChange={handlePhotoSelected}
+            />
             <div>
               <h1>{!loaded ? "Your profile" : isNew ? "Create your profile" : name}</h1>
               <p className="subtitle">
@@ -128,6 +214,29 @@ export default function ProfilePage() {
                   ? "Tell us a little about you and we'll calculate your daily targets."
                   : [GOALS[profile?.goal || ""], ACTIVITY[profile?.activity_level || ""], DIETS[profile?.diet || ""]].filter(Boolean).join(" · ")}
               </p>
+              <div className="avatar-actions-row">
+                <button
+                  type="button"
+                  className="ghost-btn-xs"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={updatingPhoto}
+                >
+                  <Camera size={11} style={{ marginRight: 4, verticalAlign: "middle" }} />
+                  {profile?.photo_data ? "Change photo" : "Upload photo"}
+                </button>
+                {profile?.photo_data && (
+                  <button
+                    type="button"
+                    className="ghost-btn-xs"
+                    onClick={removePhoto}
+                    disabled={updatingPhoto}
+                  >
+                    <Trash2 size={11} style={{ marginRight: 4, verticalAlign: "middle" }} />
+                    Remove
+                  </button>
+                )}
+                {updatingPhoto && <small className="muted">Updating…</small>}
+              </div>
             </div>
           </div>
           {loaded && !editing && !isNew && <button className="primary-btn" onClick={startEdit}><Pencil size={16} /> Edit profile</button>}

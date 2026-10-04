@@ -45,6 +45,7 @@ type ShellProps = {
 
 export default function Shell({ active, crumb, actions, className = "", children }: ShellProps) {
   const [name, setName] = useState("");
+  const [photoData, setPhotoData] = useState<string | null>(null);
   const [patterns, setPatterns] = useState<Pattern[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
   const bellRef = useRef<HTMLDivElement>(null);
@@ -110,7 +111,13 @@ export default function Shell({ active, crumb, actions, className = "", children
   }, []);
 
   useEffect(() => {
-    fetch(`${API}/api/profile`).then(r => r.json()).then(p => setName(p.name || "")).catch(() => {});
+    fetch(`${API}/api/profile?_t=${Date.now()}`)
+      .then(r => r.json())
+      .then(p => {
+        setName(p.name || "");
+        if (p.photo_data) setPhotoData(p.photo_data);
+      })
+      .catch(() => {});
     fetch(`${API}/api/patterns`).then(r => r.json()).then(d => setPatterns(d.patterns || [])).catch(() => {});
   }, []);
 
@@ -156,7 +163,11 @@ export default function Shell({ active, crumb, actions, className = "", children
           aria-label="Open your profile"
           onClick={() => setSidebarOpen(false)}
         >
-          <div className="avatar avatar-sm">{initial}</div>
+          {photoData ? (
+            <img src={photoData} alt={display} className="avatar-img avatar-sm" />
+          ) : (
+            <div className="avatar avatar-sm">{initial}</div>
+          )}
           <div><b>{display}&apos;s space</b><small>Personal plan</small></div>
         </Link>
 
@@ -187,7 +198,11 @@ export default function Shell({ active, crumb, actions, className = "", children
             href="/profile"
             onClick={() => setSidebarOpen(false)}
           >
-            <div className="avatar">{initial}</div>
+            {photoData ? (
+              <img src={photoData} alt={display} className="avatar-img avatar" />
+            ) : (
+              <div className="avatar">{initial}</div>
+            )}
             <div><b>{display}</b><small>View profile</small></div>
           </Link>
         </div>

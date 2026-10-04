@@ -100,6 +100,7 @@ class OnboardingRequest(BaseModel):
     medical_conditions: str = ""
     sleep_schedule: str = ""
     target_water_l: float | None = None
+    photo_data: str | None = None
 
 
 class FoodLogRequest(BaseModel):
@@ -149,6 +150,22 @@ def save_onboarding(payload: OnboardingRequest):
     profile = {**data, "bmr_kcal": bmr, "tdee_kcal": tdee, "onboarded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **targets}
     memory_agent.save_user_profile(profile)
     return {"status": "onboarded", **profile}
+
+
+class PhotoPayload(BaseModel):
+    photo_data: str | None = Field(default=None, max_length=5_000_000)
+
+
+@app.post("/api/profile/photo")
+def upload_profile_photo(payload: PhotoPayload):
+    result = memory_agent.update_profile_photo(payload.photo_data)
+    return {**result, "profile": memory_agent.get_user_profile()}
+
+
+@app.delete("/api/profile/photo")
+def delete_profile_photo():
+    result = memory_agent.update_profile_photo(None)
+    return {**result, "profile": memory_agent.get_user_profile()}
 
 
 @app.get("/api/overview")
