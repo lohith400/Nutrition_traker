@@ -25,12 +25,14 @@ curl http://localhost:8000/health
 `backend/.env` is local-only and ignored by Git:
 
 ```dotenv
-OPENROUTER_API_KEY=your-new-key
-OPENROUTER_MODEL=openai/gpt-4o-mini
+# Fill ONE key, leave the other two blank (OpenRouter, Gemini or DeepSeek)
+OPENROUTER_API_KEY=
+GEMINI_API_KEY=
+DEEPSEEK_API_KEY=
 CORS_ORIGINS=http://localhost:3000
 ```
 
-Coach chat returns a configuration error when `OPENROUTER_API_KEY` is empty. Profile, dashboard, food logging, suggestions, and patterns do not require the AI key.
+Coach chat returns a configuration error when `OPENROUTER_API_KEY`, `GEMINI_API_KEY` and `DEEPSEEK_API_KEY` are all empty. Profile, dashboard, food logging, suggestions, and patterns do not require the AI key.
 
 ## Windows PowerShell
 
