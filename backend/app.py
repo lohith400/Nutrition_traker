@@ -1,5 +1,10 @@
 """NutriSync HTTP API."""
 import os
+
+if os.name == "nt":
+    os.environ.pop("TZ", None)
+
+import secrets
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -9,12 +14,17 @@ from typing import Literal
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 DIR = Path(__file__).resolve().parent
 ROOT = DIR.parent
 load_dotenv(DIR / ".env")
 load_dotenv(ROOT / ".env")
+
+if os.name == "nt":
+    os.environ.pop("TZ", None)
+
 for p in (DIR, ROOT):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
@@ -35,8 +45,39 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="NutriSync API", version="0.4.0", lifespan=lifespan)
-origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if x.strip()]
-app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# --- Optional access key -------------------------------------------------------------
+# A free public deployment has a public URL. Set ACCESS_KEY on the server and only
+# requests that send the same value in the X-Access-Key header can use /api/*.
+# Unset (the default on localhost) = open, exactly like before.
+ACCESS_KEY = (os.getenv("ACCESS_KEY") or "").strip()
+
+
+@app.middleware("http")
+async def require_access_key(request, call_next):
+    if ACCESS_KEY and request.url.path.startswith("/api") and request.method != "OPTIONS":
+        if not secrets.compare_digest(request.headers.get("x-access-key", ""), ACCESS_KEY):
+            return JSONResponse({"detail": "Access key required."}, status_code=401)
+    return await call_next(request)
+
+
+# --- CORS (added AFTER the auth middleware so it is the outermost layer and CORS headers
+# are present even on 401 responses and preflight requests) ---------------------------
+# CORS_ORIGINS      comma-separated exact origins, e.g. https://nutrisync.vercel.app,http://localhost:3000
+# CORS_ORIGIN_REGEX optional pattern, e.g. https://.*\.vercel\.app  (also covers Vercel preview URLs)
+origins = [x.strip().rstrip("/") for x in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if x.strip()]
+origin_regex = (os.getenv("CORS_ORIGIN_REGEX") or r"https://.*\.vercel\.app").strip() or None
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_origin_regex=origin_regex,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+CHAT_CONTEXT_MESSAGES = int(os.getenv("CHAT_CONTEXT_MESSAGES", "20") or 20)
 
 
 class OnboardingRequest(BaseModel):
@@ -75,7 +116,11 @@ class WaterLogRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "NutriSync API"}
+    return {
+        "status": "ok",
+        "service": "NutriSync API",
+        "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
 
 @app.get("/api/profile")
@@ -305,9 +350,10 @@ def clear_chat_history(date: str | None = None):
 @app.post("/api/chat")
 def chat(payload: ChatRequest):
     if orchestrator.client is None:
-        raise HTTPException(status_code=503, detail="AI coach is not configured. Create backend/.env and set OPENROUTER_API_KEY.")
-    # Only today's conversation is sent to the model: each day is its own chat.
-    history = memory_agent.get_chat_history(date=datetime.now().strftime("%Y-%m-%d"))
+        raise HTTPException(status_code=503, detail="AI coach is not configured. Create backend/.env and set ONE of OPENROUTER_API_KEY, GEMINI_API_KEY or DEEPSEEK_API_KEY.")
+    # The last N turns (default 20, across days) are loaded from the database on every request,
+    # so the coach keeps its context after refreshes, restarts and at midnight.
+    history = memory_agent.get_recent_history(limit=CHAT_CONTEXT_MESSAGES)
     text = (payload.message or "").strip()
     image = payload.image
     if image and not image.startswith(("data:image/jpeg;base64,", "data:image/png;base64,", "data:image/webp;base64,")):
