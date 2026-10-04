@@ -131,6 +131,27 @@ def split_statements(script: str) -> list:
     return statements
 
 
+import time
+
+
+def _is_retryable_statement(sql: str) -> bool:
+    s = (sql or "").strip()
+    if not s:
+        return False
+    upper = s.upper()
+    first = upper.split()[0]
+    if first in ("SELECT", "PRAGMA", "EXPLAIN", "CREATE", "DROP", "ALTER"):
+        return True
+    if upper.startswith("INSERT OR REPLACE") or upper.startswith("INSERT OR IGNORE") or "ON CONFLICT" in upper:
+        return True
+    return False
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(k in msg for k in ("idle for too long", "sqlite_busy", "database is locked", "stream closed", "stream error", "busy"))
+
+
 class _Cursor:
     def __init__(self, conn, raw):
         self._conn, self._raw = conn, raw
@@ -150,15 +171,34 @@ class _Cursor:
 
     @property
     def description(self):
-        return self._raw.description
+        return getattr(self._raw, "description", None)
 
     def execute(self, sql, params=None):
-        sql, params = _bind(sql, params)
-        self._raw.execute(sql, params)
+        bound_sql, bound_params = _bind(sql, params)
+        try:
+            self._raw.execute(bound_sql, bound_params)
+        except Exception as exc:
+            if _is_retryable_error(exc) and _is_retryable_statement(sql):
+                time.sleep(0.3)
+                self._conn.reopen_if_needed()
+                self._raw = self._conn._raw.cursor() if hasattr(self._conn._raw, "cursor") else self._conn._raw
+                self._raw.execute(bound_sql, bound_params)
+            else:
+                raise
         return self
 
     def executemany(self, sql, seq):
-        self._raw.executemany(sql, [tuple(p) for p in seq])
+        bound_seq = [tuple(p) for p in seq]
+        try:
+            self._raw.executemany(sql, bound_seq)
+        except Exception as exc:
+            if _is_retryable_error(exc) and _is_retryable_statement(sql):
+                time.sleep(0.3)
+                self._conn.reopen_if_needed()
+                self._raw = self._conn._raw.cursor() if hasattr(self._conn._raw, "cursor") else self._conn._raw
+                self._raw.executemany(sql, bound_seq)
+            else:
+                raise
         return self
 
     def fetchone(self):
@@ -178,12 +218,25 @@ class _Cursor:
 class LibsqlConnection:
     """sqlite3.Connection look-alike around a libsql connection."""
 
-    def __init__(self, raw):
+    def __init__(self, raw, opener=None):
         self._raw = raw
+        self._opener = opener
         self.row_factory = None
 
+    def reopen_if_needed(self):
+        if self._opener:
+            try:
+                self._raw.close()
+            except Exception:
+                pass
+            try:
+                self._raw = self._opener()
+            except Exception:
+                pass
+
     def cursor(self):
-        return _Cursor(self, self._raw.cursor())
+        cur_raw = self._raw.cursor() if hasattr(self._raw, "cursor") else self._raw
+        return _Cursor(self, cur_raw)
 
     def execute(self, sql, params=None):
         return self.cursor().execute(sql, params)
@@ -193,31 +246,47 @@ class LibsqlConnection:
 
     def executescript(self, script):
         for stmt in split_statements(script):
-            self._raw.execute(stmt)
-        self._raw.commit()
+            self.execute(stmt)
+        self.commit()
 
     def commit(self):
-        self._raw.commit()
+        try:
+            self._raw.commit()
+        except Exception:
+            pass
 
     def rollback(self):
-        self._raw.rollback()
+        try:
+            self._raw.rollback()
+        except Exception:
+            pass
 
     def close(self):
-        self._raw.close()
+        self.rollback()
+        try:
+            self._raw.close()
+        except Exception:
+            pass
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, *_):
-        self.rollback() if exc_type else self.commit()
+        if exc_type:
+            self.rollback()
+        else:
+            self.commit()
+        self.close()
         return False
 
 
 def get_db_connection(path=None):
     """Open the database. `path` is only used for the local SQLite fallback."""
     if os.getenv("NUTRISYNC_FORCE_LIBSQL") == "1":  # test hook: exercise the wrapper on a local file
-        return LibsqlConnection(_import_libsql().connect(path or DEFAULT_DB_PATH))
+        opener = lambda: _import_libsql().connect(path or DEFAULT_DB_PATH)
+        return LibsqlConnection(opener(), opener=opener)
     if turso_enabled():
-        raw = _import_libsql().connect(_env("TURSO_DATABASE_URL"), auth_token=_env("TURSO_AUTH_TOKEN"))
-        return LibsqlConnection(raw)
+        opener = lambda: _import_libsql().connect(_env("TURSO_DATABASE_URL"), auth_token=_env("TURSO_AUTH_TOKEN"))
+        return LibsqlConnection(opener(), opener=opener)
     return sqlite3.connect(path or DEFAULT_DB_PATH)
+
