@@ -14,6 +14,14 @@ code base keeps using sqlite3-style calls unchanged.
 import os
 import re
 import sqlite3
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+DIR = Path(__file__).resolve().parent
+ROOT = DIR.parent
+load_dotenv(DIR / ".env")
+load_dotenv(ROOT / ".env")
 
 _DEFAULT_DB = (
     os.path.join(os.path.dirname(__file__), "..", "nutrisync.db")
@@ -207,9 +215,9 @@ class LibsqlConnection:
 
 def get_db_connection(path=None):
     """Open the database. `path` is only used for the local SQLite fallback."""
+    if os.getenv("NUTRISYNC_FORCE_LIBSQL") == "1":  # test hook: exercise the wrapper on a local file
+        return LibsqlConnection(_import_libsql().connect(path or DEFAULT_DB_PATH))
     if turso_enabled():
         raw = _import_libsql().connect(_env("TURSO_DATABASE_URL"), auth_token=_env("TURSO_AUTH_TOKEN"))
         return LibsqlConnection(raw)
-    if os.getenv("NUTRISYNC_FORCE_LIBSQL") == "1":  # test hook: exercise the wrapper on a local file
-        return LibsqlConnection(_import_libsql().connect(path or DEFAULT_DB_PATH))
     return sqlite3.connect(path or DEFAULT_DB_PATH)

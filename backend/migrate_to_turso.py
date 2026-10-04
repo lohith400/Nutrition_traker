@@ -38,6 +38,14 @@ def main(src_path: str) -> None:
     for name, _ in tables:
         cols = [c[1] for c in src.execute(f"PRAGMA table_info({name})")]
         rows = src.execute(f"SELECT {', '.join(cols)} FROM {name}").fetchall()
+        if name == "food_items":
+            try:
+                dst_count = dst.execute("SELECT COUNT(*) FROM food_items").fetchone()[0]
+                if dst_count == len(rows):
+                    print(f"  {name}: {dst_count} rows already up to date, skipping")
+                    continue
+            except Exception:
+                pass
         if rows:
             marks = ", ".join("?" for _ in cols)
             for i in range(0, len(rows), 200):

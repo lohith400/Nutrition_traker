@@ -128,18 +128,20 @@ CREATE TABLE IF NOT EXISTS user_facts (
 );
 
 CREATE TABLE IF NOT EXISTS water_logs (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_id      INTEGER PRIMARY KEY AUTOINCREMENT,
     log_date    TEXT NOT NULL,
     log_time    TEXT NOT NULL,
     amount_l    REAL NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS chat_messages (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    msg_id      INTEGER PRIMARY KEY AUTOINCREMENT,
     role        TEXT NOT NULL,
     content     TEXT NOT NULL,
-    timestamp   TEXT NOT NULL
+    tool_events TEXT,
+    created_at  TEXT NOT NULL
 );
+
 
 CREATE TABLE IF NOT EXISTS reminders (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -169,13 +171,13 @@ CREATE TABLE IF NOT EXISTS reminder_events (
 );
 
 CREATE TABLE IF NOT EXISTS grocery_items (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    item_name   TEXT NOT NULL,
-    quantity    REAL,
-    unit        TEXT,
-    category    TEXT,
-    checked     INTEGER DEFAULT 0,
-    created_at  TEXT NOT NULL
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    name_key   TEXT NOT NULL,
+    quantity   REAL NOT NULL,
+    unit       TEXT NOT NULL,
+    added_at   TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 """
 

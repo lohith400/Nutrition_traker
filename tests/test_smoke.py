@@ -18,7 +18,7 @@ for p in (BACKEND_DIR, ROOT):
 def test_client():
     """Create a temporary test database and return a FastAPI TestClient."""
     # Ensure network calls fail if attempted
-    for var in ("OPENROUTER_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "LLM_PROVIDER", "LLM_MODEL"):
+    for var in ("OPENROUTER_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "LLM_PROVIDER", "LLM_MODEL", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
         os.environ[var] = ""
     os.environ["NUTRISYNC_NO_SCHEDULER"] = "1"  # tests drive reminders.run_due() by hand
 
