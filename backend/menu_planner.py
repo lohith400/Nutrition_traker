@@ -60,24 +60,24 @@ def suggest_next_meal(remaining_protein_g: float, remaining_calories: float,
     LLM-picked, so suggestions are always grounded in verified data.
     """
     conn = _get_conn()
+    try:
+        if remaining_calories <= 0:
+            return {"status": "over_budget", "message": "Calorie budget for today is used up."}
 
-    if remaining_calories <= 0:
+        allowed = food_quality.allowed_diet_tags(diet)
+        familiar = {r["food_code"]: r["times_logged"] for r in conn.execute(
+            "SELECT food_code, times_logged FROM food_preferences"
+        ).fetchall()}
+
+        rows = conn.execute(
+            """SELECT food_code, food_name, unit_serving_energy_kcal, unit_serving_protein_g,
+                      servings_unit, energy_kcal_100g, protein_g_100g, diet_tag, quality
+               FROM food_items
+               WHERE quality != 'unreliable'
+                 AND COALESCE(unit_serving_energy_kcal, energy_kcal_100g, 0) > 0"""
+        ).fetchall()
+    finally:
         conn.close()
-        return {"status": "over_budget", "message": "Calorie budget for today is used up."}
-
-    allowed = food_quality.allowed_diet_tags(diet)
-    familiar = {r["food_code"]: r["times_logged"] for r in conn.execute(
-        "SELECT food_code, times_logged FROM food_preferences"
-    ).fetchall()}
-
-    rows = conn.execute(
-        """SELECT food_code, food_name, unit_serving_energy_kcal, unit_serving_protein_g,
-                  servings_unit, energy_kcal_100g, protein_g_100g, diet_tag, quality
-           FROM food_items
-           WHERE quality != 'unreliable'
-             AND COALESCE(unit_serving_energy_kcal, energy_kcal_100g, 0) > 0"""
-    ).fetchall()
-    conn.close()
 
     candidates = []
     for r in rows:

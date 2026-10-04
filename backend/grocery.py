@@ -5,6 +5,7 @@ suggestions. The coach only reads this list when the user explicitly asks for a
 meal made from what they have at home; it can also add/remove items when the
 user says so ("add 1 kg rice"). The Grocery page uses the same functions.
 """
+import threading
 from datetime import datetime
 
 try:
@@ -26,6 +27,9 @@ _ALIASES = {
 }
 # unit -> (group, factor to the group's base unit: grams for weight, ml for volume)
 _CONVERT = {"kg": ("weight", 1000.0), "g": ("weight", 1.0), "l": ("volume", 1000.0), "ml": ("volume", 1.0)}
+
+_grocery_table_ensured = False
+_grocery_lock = threading.Lock()
 
 
 def normalize_unit(unit) -> str:
@@ -54,17 +58,25 @@ def _key(name: str) -> str:
 
 
 def _ensure_table(conn) -> None:
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS grocery_items (
-               id         INTEGER PRIMARY KEY AUTOINCREMENT,
-               name       TEXT NOT NULL,
-               name_key   TEXT NOT NULL,
-               quantity   REAL NOT NULL,
-               unit       TEXT NOT NULL,
-               added_at   TEXT NOT NULL,
-               updated_at TEXT NOT NULL
-           )"""
-    )
+    global _grocery_table_ensured
+    if _grocery_table_ensured:
+        return
+    with _grocery_lock:
+        if _grocery_table_ensured:
+            return
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS grocery_items (
+                   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                   name       TEXT NOT NULL,
+                   name_key   TEXT NOT NULL,
+                   quantity   REAL NOT NULL,
+                   unit       TEXT NOT NULL,
+                   added_at   TEXT NOT NULL,
+                   updated_at TEXT NOT NULL
+               )"""
+        )
+        conn.commit()
+        _grocery_table_ensured = True
 
 
 def _clean_qty(q: float) -> float:
@@ -94,10 +106,12 @@ def _row(r) -> dict:
 
 def list_items() -> list:
     conn = memory_agent._get_conn()
-    _ensure_table(conn)
-    rows = conn.execute("SELECT * FROM grocery_items ORDER BY LOWER(name) ASC, unit ASC").fetchall()
-    conn.close()
-    return [_row(r) for r in rows]
+    try:
+        _ensure_table(conn)
+        rows = conn.execute("SELECT * FROM grocery_items ORDER BY LOWER(name) ASC, unit ASC").fetchall()
+        return [_row(r) for r in rows]
+    finally:
+        conn.close()
 
 
 def add_item(name: str, quantity: float = 1, unit: str = "pcs") -> dict:
@@ -114,26 +128,31 @@ def add_item(name: str, quantity: float = 1, unit: str = "pcs") -> dict:
     key = _key(name)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = memory_agent._get_conn()
-    _ensure_table(conn)
-    existing = conn.execute("SELECT * FROM grocery_items WHERE name_key = ?", (key,)).fetchall()
-    target, new_qty = None, quantity
-    for r in existing:
-        converted = _convert_qty(quantity, unit, r["unit"])
-        if converted is not None:
-            target, new_qty = r, r["quantity"] + converted
-            break
-    if target is not None:
-        conn.execute("UPDATE grocery_items SET quantity = ?, updated_at = ? WHERE id = ?",
-                     (_clean_qty(new_qty), now, target["id"]))
-        item_id, shown_unit, total = target["id"], target["unit"], new_qty
-    else:
-        cur = conn.execute(
-            "INSERT INTO grocery_items (name, name_key, quantity, unit, added_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (name, key, _clean_qty(quantity), unit, now, now))
-        item_id, shown_unit, total = cur.lastrowid, unit, quantity
-    conn.commit()
-    conn.close()
-    return {"status": "ok", "id": item_id, "name": name, "added": _fmt(quantity, unit), "now_have": _fmt(total, shown_unit)}
+    try:
+        _ensure_table(conn)
+        existing = conn.execute("SELECT * FROM grocery_items WHERE name_key = ?", (key,)).fetchall()
+        target, new_qty = None, quantity
+        for r in existing:
+            converted = _convert_qty(quantity, unit, r["unit"])
+            if converted is not None:
+                target, new_qty = r, r["quantity"] + converted
+                break
+        if target is not None:
+            conn.execute("UPDATE grocery_items SET quantity = ?, updated_at = ? WHERE id = ?",
+                         (_clean_qty(new_qty), now, target["id"]))
+            item_id, shown_unit, total = target["id"], target["unit"], new_qty
+        else:
+            cur = conn.execute(
+                "INSERT INTO grocery_items (name, name_key, quantity, unit, added_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (name, key, _clean_qty(quantity), unit, now, now))
+            item_id, shown_unit, total = cur.lastrowid, unit, quantity
+        conn.commit()
+        return {"status": "ok", "id": item_id, "name": name, "added": _fmt(quantity, unit), "now_have": _fmt(total, shown_unit)}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def add_items(items: list) -> dict:
@@ -150,36 +169,43 @@ def add_items(items: list) -> dict:
 
 def update_item(item_id: int, quantity=None, unit=None, name=None) -> dict:
     conn = memory_agent._get_conn()
-    _ensure_table(conn)
-    row = conn.execute("SELECT * FROM grocery_items WHERE id = ?", (item_id,)).fetchone()
-    if not row:
-        conn.close()
-        return {"status": "error", "error": "Item not found."}
-    new_qty = row["quantity"] if quantity is None else float(quantity)
-    if new_qty <= 0:
-        conn.execute("DELETE FROM grocery_items WHERE id = ?", (item_id,))
+    try:
+        _ensure_table(conn)
+        row = conn.execute("SELECT * FROM grocery_items WHERE id = ?", (item_id,)).fetchone()
+        if not row:
+            return {"status": "error", "error": "Item not found."}
+        new_qty = row["quantity"] if quantity is None else float(quantity)
+        if new_qty <= 0:
+            conn.execute("DELETE FROM grocery_items WHERE id = ?", (item_id,))
+            conn.commit()
+            return {"status": "removed", "id": item_id}
+        new_unit = row["unit"] if unit is None else normalize_unit(unit)
+        new_name = row["name"] if name is None else _display_name(name)
+        if not new_name:
+            return {"status": "error", "error": "Item name is required."}
+        conn.execute("UPDATE grocery_items SET name = ?, name_key = ?, quantity = ?, unit = ?, updated_at = ? WHERE id = ?",
+                     (new_name, _key(new_name), _clean_qty(new_qty), new_unit, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), item_id))
         conn.commit()
+        return {"status": "ok", "id": item_id}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
         conn.close()
-        return {"status": "removed", "id": item_id}
-    new_unit = row["unit"] if unit is None else normalize_unit(unit)
-    new_name = row["name"] if name is None else _display_name(name)
-    if not new_name:
-        conn.close()
-        return {"status": "error", "error": "Item name is required."}
-    conn.execute("UPDATE grocery_items SET name = ?, name_key = ?, quantity = ?, unit = ?, updated_at = ? WHERE id = ?",
-                 (new_name, _key(new_name), _clean_qty(new_qty), new_unit, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), item_id))
-    conn.commit()
-    conn.close()
-    return {"status": "ok", "id": item_id}
 
 
 def delete_item(item_id: int) -> dict:
     conn = memory_agent._get_conn()
-    _ensure_table(conn)
-    cur = conn.execute("DELETE FROM grocery_items WHERE id = ?", (item_id,))
-    conn.commit()
-    conn.close()
-    return {"status": "removed" if cur.rowcount else "error", **({} if cur.rowcount else {"error": "Item not found."})}
+    try:
+        _ensure_table(conn)
+        cur = conn.execute("DELETE FROM grocery_items WHERE id = ?", (item_id,))
+        conn.commit()
+        return {"status": "removed" if cur.rowcount else "error", **({} if cur.rowcount else {"error": "Item not found."})}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def find_item(name: str):

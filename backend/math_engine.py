@@ -140,8 +140,10 @@ def calculate_meal_macros(food_code: str, quantity: float, unit: str = "serving"
         return {"error": f"{quantity}g looks too large for one log entry (max {MAX_GRAMS}g)."}
 
     conn = _get_conn()
-    row = conn.execute("SELECT * FROM food_items WHERE food_code = ?", (food_code,)).fetchone()
-    conn.close()
+    try:
+        row = conn.execute("SELECT * FROM food_items WHERE food_code = ?", (food_code,)).fetchone()
+    finally:
+        conn.close()
 
     if row is None:
         return {"error": f"Unknown food_code: {food_code}"}
@@ -202,18 +204,19 @@ def get_remaining_budget_today(log_date: str) -> dict:
     Pure SQL aggregation + subtraction -- again, no model touches this.
     """
     conn = _get_conn()
-    profile = conn.execute("SELECT * FROM user_profile WHERE id = 1").fetchone()
-    if profile is None:
-        conn.close()
-        return {"error": "User not onboarded yet."}
+    try:
+        profile = conn.execute("SELECT * FROM user_profile WHERE id = 1").fetchone()
+        if profile is None:
+            return {"error": "User not onboarded yet."}
 
-    totals = conn.execute(
-        """SELECT COALESCE(SUM(calories),0) as cal, COALESCE(SUM(protein_g),0) as pro,
-                  COALESCE(SUM(carbs_g),0) as carb, COALESCE(SUM(fat_g),0) as fat
-           FROM daily_logs WHERE log_date = ?""",
-        (log_date,),
-    ).fetchone()
-    conn.close()
+        totals = conn.execute(
+            """SELECT COALESCE(SUM(calories),0) as cal, COALESCE(SUM(protein_g),0) as pro,
+                      COALESCE(SUM(carbs_g),0) as carb, COALESCE(SUM(fat_g),0) as fat
+               FROM daily_logs WHERE log_date = ?""",
+            (log_date,),
+        ).fetchone()
+    finally:
+        conn.close()
 
     return {
         "date": log_date,

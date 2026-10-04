@@ -16,14 +16,20 @@ Math Engine's job) -- it only stores what the Math Engine already
 calculated, and reasons about trends across stored history.
 """
 
+import json as _json
+import logging
+import os
 import sqlite3
+import threading
+import time
+from datetime import datetime, timedelta
 
 try:
     from backend.database import get_db_connection
 except ImportError:  # run from inside backend/
     from database import get_db_connection
-import os
-from datetime import datetime, timedelta
+
+_logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = (
     os.path.join(os.path.dirname(__file__), "..", "nutrisync.db")
@@ -31,6 +37,15 @@ _DEFAULT_DB = (
     else os.path.join(os.path.dirname(__file__), "nutrisync.db")
 )
 DB_PATH = os.getenv("NUTRISYNC_DB_PATH", _DEFAULT_DB)
+
+_water_table_ensured = False
+_water_table_lock = threading.Lock()
+
+_chat_table_ensured = False
+_chat_table_lock = threading.Lock()
+
+_patterns_write_lock = threading.Lock()
+_last_patterns_detection_ts = 0.0
 
 
 def _get_conn():
@@ -48,31 +63,38 @@ def save_user_profile(profile: dict) -> dict:
     targets (from math_engine.calculate_bmr_tdee / calculate_targets).
     """
     conn = _get_conn()
-    profile = {**profile, "diet": profile.get("diet") or "any"}
-    conn.execute(
-        """INSERT OR REPLACE INTO user_profile
-           (id, name, age, sex, height_cm, current_weight_kg, target_weight_kg,
-            goal, activity_level, allergies, medical_conditions, sleep_schedule,
-            diet, bmr_kcal, tdee_kcal, target_calories, target_protein_g,
-            target_carbs_g, target_fat_g, target_water_l, onboarded_at)
-           VALUES (1, :name, :age, :sex, :height_cm, :current_weight_kg, :target_weight_kg,
-                   :goal, :activity_level, :allergies, :medical_conditions, :sleep_schedule,
-                   :diet, :bmr_kcal, :tdee_kcal, :target_calories, :target_protein_g,
-                   :target_carbs_g, :target_fat_g, :target_water_l, :onboarded_at)""",
-        profile,
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "saved"}
+    try:
+        profile = {**profile, "diet": profile.get("diet") or "any"}
+        conn.execute(
+            """INSERT OR REPLACE INTO user_profile
+               (id, name, age, sex, height_cm, current_weight_kg, target_weight_kg,
+                goal, activity_level, allergies, medical_conditions, sleep_schedule,
+                diet, bmr_kcal, tdee_kcal, target_calories, target_protein_g,
+                target_carbs_g, target_fat_g, target_water_l, onboarded_at)
+               VALUES (1, :name, :age, :sex, :height_cm, :current_weight_kg, :target_weight_kg,
+                       :goal, :activity_level, :allergies, :medical_conditions, :sleep_schedule,
+                       :diet, :bmr_kcal, :tdee_kcal, :target_calories, :target_protein_g,
+                       :target_carbs_g, :target_fat_g, :target_water_l, :onboarded_at)""",
+            profile,
+        )
+        conn.commit()
+        return {"status": "saved"}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def get_user_profile() -> dict:
     conn = _get_conn()
-    row = conn.execute("SELECT * FROM user_profile WHERE id = 1").fetchone()
-    conn.close()
-    if row is None:
-        return {"status": "not_onboarded"}
-    return dict(row)
+    try:
+        row = conn.execute("SELECT * FROM user_profile WHERE id = 1").fetchone()
+        if row is None:
+            return {"status": "not_onboarded"}
+        return dict(row)
+    finally:
+        conn.close()
 
 
 def get_user_diet() -> str:
@@ -95,48 +117,55 @@ def log_meal(meal_type: str, food_code: str, food_name: str, quantity: float,
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d")
     conn = _get_conn()
-    conn.execute(
-        """INSERT INTO daily_logs
-           (log_date, log_time, meal_type, food_code, food_name, quantity,
-            calories, protein_g, carbs_g, fat_g, unit, serving_label)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (date_str, now.strftime("%Y-%m-%d %H:%M:%S"), meal_type,
-         food_code, food_name, quantity, calories, protein_g, carbs_g, fat_g,
-         unit, serving_label),
-    )
-    if food_code:
-        col = {"breakfast": "breakfast_count", "lunch": "lunch_count",
-               "dinner": "dinner_count", "snack": "snack_count"}.get(meal_type, "snack_count")
-        counts = {"breakfast_count": 0, "lunch_count": 0, "dinner_count": 0, "snack_count": 0, col: 1}
+    try:
         conn.execute(
-            f"""INSERT INTO food_preferences
-                (food_code, food_name, times_logged, first_eaten, last_eaten,
-                 breakfast_count, lunch_count, dinner_count, snack_count, total_amount, grams_count)
-                VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(food_code) DO UPDATE SET
-                    times_logged = times_logged + 1,
-                    last_eaten = excluded.last_eaten,
-                    {col} = {col} + 1,
-                    total_amount = total_amount + excluded.total_amount,
-                    grams_count = grams_count + excluded.grams_count""",
-            (food_code, food_name, date_str, date_str,
-             counts["breakfast_count"], counts["lunch_count"], counts["dinner_count"], counts["snack_count"],
-             quantity, 1 if unit == "grams" else 0),
+            """INSERT INTO daily_logs
+               (log_date, log_time, meal_type, food_code, food_name, quantity,
+                calories, protein_g, carbs_g, fat_g, unit, serving_label)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (date_str, now.strftime("%Y-%m-%d %H:%M:%S"), meal_type,
+             food_code, food_name, quantity, calories, protein_g, carbs_g, fat_g,
+             unit, serving_label),
         )
-    conn.commit()
-    conn.close()
-    return {"status": "logged", "date": date_str}
+        if food_code:
+            col = {"breakfast": "breakfast_count", "lunch": "lunch_count",
+                   "dinner": "dinner_count", "snack": "snack_count"}.get(meal_type, "snack_count")
+            counts = {"breakfast_count": 0, "lunch_count": 0, "dinner_count": 0, "snack_count": 0, col: 1}
+            conn.execute(
+                f"""INSERT INTO food_preferences
+                    (food_code, food_name, times_logged, first_eaten, last_eaten,
+                     breakfast_count, lunch_count, dinner_count, snack_count, total_amount, grams_count)
+                    VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(food_code) DO UPDATE SET
+                        times_logged = times_logged + 1,
+                        last_eaten = excluded.last_eaten,
+                        {col} = {col} + 1,
+                        total_amount = total_amount + excluded.total_amount,
+                        grams_count = grams_count + excluded.grams_count""",
+                (food_code, food_name, date_str, date_str,
+                 counts["breakfast_count"], counts["lunch_count"], counts["dinner_count"], counts["snack_count"],
+                 quantity, 1 if unit == "grams" else 0),
+            )
+        conn.commit()
+        return {"status": "logged", "date": date_str}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def get_todays_logs() -> dict:
     today = datetime.now().strftime("%Y-%m-%d")
     conn = _get_conn()
-    rows = conn.execute(
-        "SELECT meal_type, food_name, quantity, unit, serving_label, calories, protein_g, carbs_g, fat_g "
-        "FROM daily_logs WHERE log_date = ? ORDER BY log_time", (today,),
-    ).fetchall()
-    conn.close()
-    return {"date": today, "meals": [dict(r) for r in rows]}
+    try:
+        rows = conn.execute(
+            "SELECT meal_type, food_name, quantity, unit, serving_label, calories, protein_g, carbs_g, fat_g "
+            "FROM daily_logs WHERE log_date = ? ORDER BY log_time", (today,),
+        ).fetchall()
+        return {"date": today, "meals": [dict(r) for r in rows]}
+    finally:
+        conn.close()
 
 
 def get_logs_history(days: int = 14) -> list:
@@ -144,13 +173,15 @@ def get_logs_history(days: int = 14) -> list:
     recent first), each with that day's totals."""
     since = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     conn = _get_conn()
-    rows = conn.execute(
-        "SELECT log_date, log_time, meal_type, food_name, quantity, unit, serving_label, "
-        "calories, protein_g, carbs_g, fat_g FROM daily_logs WHERE log_date >= ? "
-        "ORDER BY log_date DESC, log_time ASC",
-        (since,),
-    ).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT log_date, log_time, meal_type, food_name, quantity, unit, serving_label, "
+            "calories, protein_g, carbs_g, fat_g FROM daily_logs WHERE log_date >= ? "
+            "ORDER BY log_date DESC, log_time ASC",
+            (since,),
+        ).fetchall()
+    finally:
+        conn.close()
 
     by_date: dict = {}
     for r in rows:
@@ -177,38 +208,53 @@ def get_logs_history(days: int = 14) -> list:
 # ---------- Water tracking ----------
 
 def _ensure_water_table(conn) -> None:
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS water_logs (
-               log_id   INTEGER PRIMARY KEY AUTOINCREMENT,
-               log_date TEXT NOT NULL,
-               log_time TEXT NOT NULL,
-               amount_l REAL NOT NULL
-           )"""
-    )
+    global _water_table_ensured
+    if _water_table_ensured:
+        return
+    with _water_table_lock:
+        if _water_table_ensured:
+            return
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS water_logs (
+                   log_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                   log_date TEXT NOT NULL,
+                   log_time TEXT NOT NULL,
+                   amount_l REAL NOT NULL
+               )"""
+        )
+        conn.commit()
+        _water_table_ensured = True
 
 
 def log_water(amount_l: float) -> dict:
     now = datetime.now()
     conn = _get_conn()
-    _ensure_water_table(conn)
-    conn.execute(
-        "INSERT INTO water_logs (log_date, log_time, amount_l) VALUES (?, ?, ?)",
-        (now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d %H:%M:%S"), amount_l),
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "logged"}
+    try:
+        _ensure_water_table(conn)
+        conn.execute(
+            "INSERT INTO water_logs (log_date, log_time, amount_l) VALUES (?, ?, ?)",
+            (now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d %H:%M:%S"), amount_l),
+        )
+        conn.commit()
+        return {"status": "logged"}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def get_todays_water() -> dict:
     today = datetime.now().strftime("%Y-%m-%d")
     conn = _get_conn()
-    _ensure_water_table(conn)
-    row = conn.execute(
-        "SELECT COALESCE(SUM(amount_l),0) as total FROM water_logs WHERE log_date = ?", (today,)
-    ).fetchone()
-    conn.close()
-    return {"date": today, "consumed_water_l": round(row["total"], 2)}
+    try:
+        _ensure_water_table(conn)
+        row = conn.execute(
+            "SELECT COALESCE(SUM(amount_l),0) as total FROM water_logs WHERE log_date = ?", (today,)
+        ).fetchone()
+        return {"date": today, "consumed_water_l": round(row["total"], 2)}
+    finally:
+        conn.close()
 
 
 # ---------- Long-term memory: pattern detection ----------
@@ -239,114 +285,146 @@ def detect_patterns() -> dict:
     that forgets everything" into something that sounds like it actually
     knows the user's habits.
     """
-    conn = _get_conn()
-    profile = conn.execute("SELECT * FROM user_profile WHERE id = 1").fetchone()
-    if profile is None:
-        conn.close()
-        return {"status": "not_onboarded"}
+    with _patterns_write_lock:
+        conn = _get_conn()
+        try:
+            profile = conn.execute("SELECT * FROM user_profile WHERE id = 1").fetchone()
+            if profile is None:
+                return {"status": "not_onboarded"}
 
-    seven_days_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-    new_patterns = []
+            seven_days_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            new_patterns = []
 
-    # Pattern 1: consistently low breakfast protein
-    breakfast_protein = conn.execute(
-        """SELECT log_date, COALESCE(SUM(protein_g),0) as protein
-           FROM daily_logs WHERE meal_type = 'breakfast' AND log_date >= ?
-           GROUP BY log_date ORDER BY log_date DESC""",
-        (seven_days_ago,),
-    ).fetchall()
-    low_protein_days = [r["log_date"] for r in breakfast_protein if r["protein"] < 10]
-    if len(low_protein_days) >= 3:
-        desc = f"Breakfast protein has been under 10g on {len(low_protein_days)} of the last 7 days."
-        _upsert_pattern(conn, "low_protein_breakfast", desc)
-        new_patterns.append(desc)
-    else:
-        _deactivate_pattern(conn, "low_protein_breakfast")
+            # Pattern 1: consistently low breakfast protein
+            breakfast_protein = conn.execute(
+                """SELECT log_date, COALESCE(SUM(protein_g),0) as protein
+                   FROM daily_logs WHERE meal_type = 'breakfast' AND log_date >= ?
+                   GROUP BY log_date ORDER BY log_date DESC""",
+                (seven_days_ago,),
+            ).fetchall()
+            low_protein_days = [r["log_date"] for r in breakfast_protein if r["protein"] < 10]
+            if len(low_protein_days) >= 3:
+                desc = f"Breakfast protein has been under 10g on {len(low_protein_days)} of the last 7 days."
+                _upsert_pattern(conn, "low_protein_breakfast", desc)
+                new_patterns.append(desc)
+            else:
+                _deactivate_pattern(conn, "low_protein_breakfast")
 
-    # Pattern 2: favourite foods (top 3 most-logged, at least 3 times)
-    favourites = conn.execute(
-        "SELECT food_name, times_logged FROM food_preferences WHERE times_logged >= 3 "
-        "ORDER BY times_logged DESC LIMIT 3"
-    ).fetchall()
-    if favourites:
-        names = ", ".join(f"{f['food_name']} ({f['times_logged']}x)" for f in favourites)
-        desc = f"Regularly logged foods: {names}."
-        _upsert_pattern(conn, "favourite_foods", desc)
-        new_patterns.append(desc)
-    else:
-        _deactivate_pattern(conn, "favourite_foods")
+            # Pattern 2: favourite foods (top 3 most-logged, at least 3 times)
+            favourites = conn.execute(
+                "SELECT food_name, times_logged FROM food_preferences WHERE times_logged >= 3 "
+                "ORDER BY times_logged DESC LIMIT 3"
+            ).fetchall()
+            if favourites:
+                names = ", ".join(f"{f['food_name']} ({f['times_logged']}x)" for f in favourites)
+                desc = f"Regularly logged foods: {names}."
+                _upsert_pattern(conn, "favourite_foods", desc)
+                new_patterns.append(desc)
+            else:
+                _deactivate_pattern(conn, "favourite_foods")
 
-    # Pattern 3: calories consistently under or over target
-    daily_totals = conn.execute(
-        """SELECT log_date, COALESCE(SUM(calories),0) as cal FROM daily_logs
-           WHERE log_date >= ? GROUP BY log_date""",
-        (seven_days_ago,),
-    ).fetchall()
-    target = profile["target_calories"] or 0
-    if target and len(daily_totals) >= 3:
-        under_days = sum(1 for r in daily_totals if r["cal"] < target * 0.8)
-        over_days = sum(1 for r in daily_totals if r["cal"] > target * 1.15)
-        if under_days >= 3:
-            desc = f"Calorie intake has been at least 20% under target on {under_days} of the last {len(daily_totals)} logged days."
-            _upsert_pattern(conn, "under_eating", desc)
-            new_patterns.append(desc)
-        else:
-            _deactivate_pattern(conn, "under_eating")
-        if over_days >= 3:
-            desc = f"Calorie intake has been at least 15% over target on {over_days} of the last {len(daily_totals)} logged days."
-            _upsert_pattern(conn, "over_eating", desc)
-            new_patterns.append(desc)
-        else:
-            _deactivate_pattern(conn, "over_eating")
+            # Pattern 3: calories consistently under or over target
+            daily_totals = conn.execute(
+                """SELECT log_date, COALESCE(SUM(calories),0) as cal FROM daily_logs
+                   WHERE log_date >= ? GROUP BY log_date""",
+                (seven_days_ago,),
+            ).fetchall()
+            target = profile["target_calories"] or 0
+            if target and len(daily_totals) >= 3:
+                under_days = sum(1 for r in daily_totals if r["cal"] < target * 0.8)
+                over_days = sum(1 for r in daily_totals if r["cal"] > target * 1.15)
+                if under_days >= 3:
+                    desc = f"Calorie intake has been at least 20% under target on {under_days} of the last {len(daily_totals)} logged days."
+                    _upsert_pattern(conn, "under_eating", desc)
+                    new_patterns.append(desc)
+                else:
+                    _deactivate_pattern(conn, "under_eating")
+                if over_days >= 3:
+                    desc = f"Calorie intake has been at least 15% over target on {over_days} of the last {len(daily_totals)} logged days."
+                    _upsert_pattern(conn, "over_eating", desc)
+                    new_patterns.append(desc)
+                else:
+                    _deactivate_pattern(conn, "over_eating")
 
-    conn.commit()
-    conn.close()
-    return {"status": "checked", "new_patterns": new_patterns}
+            conn.commit()
+            return {"status": "checked", "new_patterns": new_patterns}
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
+def maybe_detect_patterns(force: bool = False) -> dict:
+    """Run detect_patterns at most once every 10 minutes unless force=True (e.g. after logging a meal).
+    Wrapped in try/except so failures only log a warning and do not raise."""
+    global _last_patterns_detection_ts
+    now = time.time()
+    if not force and (now - _last_patterns_detection_ts < 600):
+        return {"status": "throttled"}
+    try:
+        res = detect_patterns()
+        _last_patterns_detection_ts = time.time()
+        return res
+    except Exception as exc:
+        _logger.warning("detect_patterns failed: %s", exc)
+        return {"status": "failed", "error": str(exc)}
 
 
 def get_active_patterns() -> dict:
     conn = _get_conn()
-    rows = conn.execute(
-        "SELECT pattern_type, description, detected_on FROM detected_patterns "
-        "WHERE still_active = 1 ORDER BY detected_on DESC LIMIT 5"
-    ).fetchall()
-    conn.close()
-    return {"patterns": [dict(r) for r in rows]}
+    try:
+        rows = conn.execute(
+            "SELECT pattern_type, description, detected_on FROM detected_patterns "
+            "WHERE still_active = 1 ORDER BY detected_on DESC LIMIT 5"
+        ).fetchall()
+        return {"patterns": [dict(r) for r in rows]}
+    finally:
+        conn.close()
 
 
 # ---------- Long-term memory: food preferences ----------
 
 def get_food_preferences(limit: int = 10) -> dict:
     conn = _get_conn()
-    rows = conn.execute(
-        "SELECT food_code, food_name, times_logged, first_eaten, last_eaten, "
-        "breakfast_count, lunch_count, dinner_count, snack_count "
-        "FROM food_preferences ORDER BY times_logged DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
-    conn.close()
-    return {"foods": [dict(r) for r in rows]}
+    try:
+        rows = conn.execute(
+            "SELECT food_code, food_name, times_logged, first_eaten, last_eaten, "
+            "breakfast_count, lunch_count, dinner_count, snack_count "
+            "FROM food_preferences ORDER BY times_logged DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return {"foods": [dict(r) for r in rows]}
+    finally:
+        conn.close()
 
 
 # ---------- Long-term memory: explicit user facts ----------
 
 def set_user_fact(key: str, value: str) -> dict:
     conn = _get_conn()
-    conn.execute(
-        """INSERT INTO user_facts (fact_key, fact_value, updated_at) VALUES (?, ?, ?)
-           ON CONFLICT(fact_key) DO UPDATE SET fact_value = excluded.fact_value, updated_at = excluded.updated_at""",
-        (key, value, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "saved"}
+    try:
+        conn.execute(
+            """INSERT INTO user_facts (fact_key, fact_value, updated_at) VALUES (?, ?, ?)
+               ON CONFLICT(fact_key) DO UPDATE SET fact_value = excluded.fact_value, updated_at = excluded.updated_at""",
+            (key, value, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        conn.commit()
+        return {"status": "saved"}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def get_user_facts() -> dict:
     conn = _get_conn()
-    rows = conn.execute("SELECT fact_key, fact_value, updated_at FROM user_facts").fetchall()
-    conn.close()
-    return {r["fact_key"]: r["fact_value"] for r in rows}
+    try:
+        rows = conn.execute("SELECT fact_key, fact_value, updated_at FROM user_facts").fetchall()
+        return {r["fact_key"]: r["fact_value"] for r in rows}
+    finally:
+        conn.close()
 
 
 # ---------- Coach chat history ----------
@@ -355,29 +433,41 @@ def get_user_facts() -> dict:
 # the same SQLite database as everything else rather than in memory.
 
 def _ensure_chat_table(conn) -> None:
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS chat_messages (
-               msg_id     INTEGER PRIMARY KEY AUTOINCREMENT,
-               role       TEXT NOT NULL,
-               content    TEXT NOT NULL,
-               tool_events TEXT,
-               created_at TEXT NOT NULL
-           )"""
-    )
+    global _chat_table_ensured
+    if _chat_table_ensured:
+        return
+    with _chat_table_lock:
+        if _chat_table_ensured:
+            return
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS chat_messages (
+                   msg_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                   role       TEXT NOT NULL,
+                   content    TEXT NOT NULL,
+                   tool_events TEXT,
+                   created_at TEXT NOT NULL
+               )"""
+        )
+        conn.commit()
+        _chat_table_ensured = True
 
 
 def save_chat_message(role: str, content: str, tool_events=None) -> dict:
-    import json as _json
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = _get_conn()
-    _ensure_chat_table(conn)
-    conn.execute(
-        "INSERT INTO chat_messages (role, content, tool_events, created_at) VALUES (?, ?, ?, ?)",
-        (role, content, _json.dumps(tool_events) if tool_events else None, now),
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "saved"}
+    try:
+        _ensure_chat_table(conn)
+        conn.execute(
+            "INSERT INTO chat_messages (role, content, tool_events, created_at) VALUES (?, ?, ?, ?)",
+            (role, content, _json.dumps(tool_events) if tool_events else None, now),
+        )
+        conn.commit()
+        return {"status": "saved"}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _today() -> str:
@@ -388,22 +478,23 @@ def get_chat_history(limit: int = 500, date: str | None = None) -> list:
     """Chat transcript, oldest first. With `date` (YYYY-MM-DD) only that day's
     conversation is returned -- each day is its own chat page. Without it,
     everything is returned (kept for backward compatibility)."""
-    import json as _json
     conn = _get_conn()
-    _ensure_chat_table(conn)
-    if date:
-        rows = conn.execute(
-            "SELECT role, content, tool_events, created_at FROM chat_messages "
-            "WHERE substr(created_at, 1, 10) = ? ORDER BY msg_id ASC LIMIT ?",
-            (date, limit),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT role, content, tool_events, created_at FROM chat_messages "
-            "ORDER BY msg_id ASC LIMIT ?",
-            (limit,),
-        ).fetchall()
-    conn.close()
+    try:
+        _ensure_chat_table(conn)
+        if date:
+            rows = conn.execute(
+                "SELECT role, content, tool_events, created_at FROM chat_messages "
+                "WHERE substr(created_at, 1, 10) = ? ORDER BY msg_id ASC LIMIT ?",
+                (date, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT role, content, tool_events, created_at FROM chat_messages "
+                "ORDER BY msg_id ASC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    finally:
+        conn.close()
     out = []
     for r in rows:
         item = dict(r)
@@ -416,16 +507,17 @@ def get_recent_history(limit: int = 20) -> list:
     """The last `limit` chat turns (oldest first), across days -- this is what the coach
     receives on every request so it never loses context, even right after midnight or a
     server restart. Stored in `chat_messages` (Turso in production)."""
-    import json as _json
     conn = _get_conn()
-    _ensure_chat_table(conn)
-    rows = conn.execute(
-        "SELECT role, content, tool_events, created_at FROM ("
-        "  SELECT msg_id, role, content, tool_events, created_at FROM chat_messages "
-        "  ORDER BY msg_id DESC LIMIT ?) ORDER BY msg_id ASC",
-        (max(1, int(limit)),),
-    ).fetchall()
-    conn.close()
+    try:
+        _ensure_chat_table(conn)
+        rows = conn.execute(
+            "SELECT role, content, tool_events, created_at FROM ("
+            "  SELECT msg_id, role, content, tool_events, created_at FROM chat_messages "
+            "  ORDER BY msg_id DESC LIMIT ?) ORDER BY msg_id ASC",
+            (max(1, int(limit)),),
+        ).fetchall()
+    finally:
+        conn.close()
     out = []
     for r in rows:
         item = dict(r)
@@ -439,22 +531,24 @@ def list_chat_days(days: int = 60) -> list:
     message count and a short preview of the first thing the user said. Today
     is always included so the "Today" chat page is available even when empty."""
     conn = _get_conn()
-    _ensure_chat_table(conn)
-    rows = conn.execute(
-        "SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS n FROM chat_messages "
-        "GROUP BY day ORDER BY day DESC LIMIT ?",
-        (days,),
-    ).fetchall()
-    result = []
-    for r in rows:
-        first = conn.execute(
-            "SELECT content FROM chat_messages WHERE substr(created_at, 1, 10) = ? AND role = 'user' "
-            "ORDER BY msg_id ASC LIMIT 1",
-            (r["day"],),
-        ).fetchone()
-        preview = (first["content"] if first else "")[:60]
-        result.append({"date": r["day"], "messages": r["n"], "preview": preview})
-    conn.close()
+    try:
+        _ensure_chat_table(conn)
+        rows = conn.execute(
+            "SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS n FROM chat_messages "
+            "GROUP BY day ORDER BY day DESC LIMIT ?",
+            (days,),
+        ).fetchall()
+        result = []
+        for r in rows:
+            first = conn.execute(
+                "SELECT content FROM chat_messages WHERE substr(created_at, 1, 10) = ? AND role = 'user' "
+                "ORDER BY msg_id ASC LIMIT 1",
+                (r["day"],),
+            ).fetchone()
+            preview = (first["content"] if first else "")[:60]
+            result.append({"date": r["day"], "messages": r["n"], "preview": preview})
+    finally:
+        conn.close()
     today = _today()
     if not any(d["date"] == today for d in result):
         result.insert(0, {"date": today, "messages": 0, "preview": ""})
@@ -464,11 +558,16 @@ def list_chat_days(days: int = 60) -> list:
 def clear_chat_history(date: str | None = None) -> dict:
     """Delete one day's conversation (`date`), or everything when omitted."""
     conn = _get_conn()
-    _ensure_chat_table(conn)
-    if date:
-        conn.execute("DELETE FROM chat_messages WHERE substr(created_at, 1, 10) = ?", (date,))
-    else:
-        conn.execute("DELETE FROM chat_messages")
-    conn.commit()
-    conn.close()
-    return {"status": "cleared"}
+    try:
+        _ensure_chat_table(conn)
+        if date:
+            conn.execute("DELETE FROM chat_messages WHERE substr(created_at, 1, 10) = ?", (date,))
+        else:
+            conn.execute("DELETE FROM chat_messages")
+        conn.commit()
+        return {"status": "cleared"}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()

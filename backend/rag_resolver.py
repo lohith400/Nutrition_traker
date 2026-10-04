@@ -99,11 +99,13 @@ def resolve_food(item_name: str, diet: str = "any") -> dict:
     allowed = food_quality.allowed_diet_tags(diet)
 
     conn = _get_conn()
-    all_rows = conn.execute(
-        "SELECT food_code, food_name, quality, quality_note, diet_tag, serving_grams, servings_unit "
-        "FROM food_items"
-    ).fetchall()
-    conn.close()
+    try:
+        all_rows = conn.execute(
+            "SELECT food_code, food_name, quality, quality_note, diet_tag, serving_grams, servings_unit "
+            "FROM food_items"
+        ).fetchall()
+    finally:
+        conn.close()
 
     def in_diet(r):
         return (r["diet_tag"] or "vegetarian") in allowed
@@ -155,12 +157,14 @@ def search_foods(query: str, diet: str = "any", limit: int = 8) -> list:
     q = query.lower().strip()
     allowed = food_quality.allowed_diet_tags(diet)
     conn = _get_conn()
-    rows = conn.execute(
-        "SELECT food_code, food_name, quality, diet_tag, servings_unit, serving_grams "
-        "FROM food_items WHERE lower(food_name) LIKE ?",
-        (f"%{q}%",),
-    ).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT food_code, food_name, quality, diet_tag, servings_unit, serving_grams "
+            "FROM food_items WHERE lower(food_name) LIKE ?",
+            (f"%{q}%",),
+        ).fetchall()
+    finally:
+        conn.close()
     rows = [r for r in rows if (r["diet_tag"] or "vegetarian") in allowed]
     rows.sort(key=lambda r: _rank_key(r, len(q)))
     return [dict(r) for r in rows[:limit]]

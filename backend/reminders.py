@@ -38,41 +38,53 @@ POLL_SECONDS = 15
 _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 MEAL_TYPES = ("breakfast", "lunch", "dinner", "snack")
 
+_reminders_tables_ensured = False
+_reminders_ensure_lock = threading.Lock()
+_reminders_write_lock = threading.Lock()
+
 
 def _get_conn():
     return memory_agent._get_conn()
 
 
 def _ensure_tables(conn) -> None:
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS reminders (
-               id              INTEGER PRIMARY KEY AUTOINCREMENT,
-               kind            TEXT NOT NULL,            -- 'food' | 'water'
-               remind_time     TEXT NOT NULL,            -- 'HH:MM' (24h)
-               repeat          TEXT NOT NULL DEFAULT 'daily',   -- 'daily' | 'once'
-               once_date       TEXT,                     -- for repeat='once'
-               food_name       TEXT,
-               quantity        REAL,
-               unit            TEXT DEFAULT 'serving',
-               meal_type       TEXT,
-               water_l         REAL,
-               auto_log        INTEGER NOT NULL DEFAULT 1,
-               enabled         INTEGER NOT NULL DEFAULT 1,
-               last_fired_date TEXT,
-               created_at      TEXT NOT NULL
-           )"""
-    )
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS reminder_events (
-               id          INTEGER PRIMARY KEY AUTOINCREMENT,
-               reminder_id INTEGER,
-               fired_at    TEXT NOT NULL,
-               title       TEXT NOT NULL,
-               message     TEXT NOT NULL,
-               logged      INTEGER NOT NULL DEFAULT 0,
-               channels    TEXT DEFAULT ''
-           )"""
-    )
+    global _reminders_tables_ensured
+    if _reminders_tables_ensured:
+        return
+    with _reminders_ensure_lock:
+        if _reminders_tables_ensured:
+            return
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS reminders (
+                   id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                   kind            TEXT NOT NULL,            -- 'food' | 'water'
+                   remind_time     TEXT NOT NULL,            -- 'HH:MM' (24h)
+                   repeat          TEXT NOT NULL DEFAULT 'daily',   -- 'daily' | 'once'
+                   once_date       TEXT,                     -- for repeat='once'
+                   food_name       TEXT,
+                   quantity        REAL,
+                   unit            TEXT DEFAULT 'serving',
+                   meal_type       TEXT,
+                   water_l         REAL,
+                   auto_log        INTEGER NOT NULL DEFAULT 1,
+                   enabled         INTEGER NOT NULL DEFAULT 1,
+                   last_fired_date TEXT,
+                   created_at      TEXT NOT NULL
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS reminder_events (
+                   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                   reminder_id INTEGER,
+                   fired_at    TEXT NOT NULL,
+                   title       TEXT NOT NULL,
+                   message     TEXT NOT NULL,
+                   logged      INTEGER NOT NULL DEFAULT 0,
+                   channels    TEXT DEFAULT ''
+               )"""
+        )
+        conn.commit()
+        _reminders_tables_ensured = True
 
 
 def _open():
@@ -219,49 +231,68 @@ def create_reminder(kind: str, remind_time: str, repeat: str = "daily", food_nam
         once_date = (now if due_today >= now else now + timedelta(days=1)).strftime("%Y-%m-%d")
 
     conn = _open()
-    cur = conn.execute(
-        """INSERT INTO reminders (kind, remind_time, repeat, once_date, food_name, quantity, unit,
-                                  meal_type, water_l, auto_log, enabled, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
-        (kind, hhmm, repeat, once_date, stored_food, quantity, unit, meal_type, water_l,
-         1 if auto_log else 0, now.strftime("%Y-%m-%d %H:%M:%S")),
-    )
-    conn.commit()
-    row = conn.execute("SELECT * FROM reminders WHERE id = ?", (cur.lastrowid,)).fetchone()
-    conn.close()
-    return {"status": "created", "reminder": _row(row)}
+    try:
+        cur = conn.execute(
+            """INSERT INTO reminders (kind, remind_time, repeat, once_date, food_name, quantity, unit,
+                                      meal_type, water_l, auto_log, enabled, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+            (kind, hhmm, repeat, once_date, stored_food, quantity, unit, meal_type, water_l,
+             1 if auto_log else 0, now.strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM reminders WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return {"status": "created", "reminder": _row(row)}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def list_reminders() -> list:
     conn = _open()
-    rows = conn.execute("SELECT * FROM reminders ORDER BY remind_time, id").fetchall()
-    conn.close()
-    return [_row(r) for r in rows]
+    try:
+        rows = conn.execute("SELECT * FROM reminders ORDER BY remind_time, id").fetchall()
+        return [_row(r) for r in rows]
+    finally:
+        conn.close()
 
 
 def set_enabled(reminder_id: int, enabled: bool) -> bool:
     conn = _open()
-    cur = conn.execute("UPDATE reminders SET enabled = ? WHERE id = ?", (1 if enabled else 0, reminder_id))
-    conn.commit()
-    conn.close()
-    return cur.rowcount > 0
+    try:
+        cur = conn.execute("UPDATE reminders SET enabled = ? WHERE id = ?", (1 if enabled else 0, reminder_id))
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def delete_reminder(reminder_id: int) -> bool:
     conn = _open()
-    cur = conn.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
-    conn.commit()
-    conn.close()
-    return cur.rowcount > 0
+    try:
+        cur = conn.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def list_events(since_id: int = 0, limit: int = 30) -> list:
     conn = _open()
-    rows = conn.execute(
-        "SELECT * FROM reminder_events WHERE id > ? ORDER BY id DESC LIMIT ?", (since_id, limit)
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    try:
+        rows = conn.execute(
+            "SELECT * FROM reminder_events WHERE id > ? ORDER BY id DESC LIMIT ?", (since_id, limit)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -308,14 +339,20 @@ def fire_reminder(r: dict, notify: bool = True) -> dict:
     title = "NutriSync: water time" if r["kind"] == "water" else "NutriSync: meal time"
     message = f"{verb} {what}." + (f" {detail}" if detail else "")
 
+    # Network call runs outside of any open DB transaction
     delivery = send_notifications(title, message) if notify else {"sent": [], "errors": {}}
     conn = _open()
-    conn.execute(
-        "INSERT INTO reminder_events (reminder_id, fired_at, title, message, logged, channels) VALUES (?, ?, ?, ?, ?, ?)",
-        (r["id"], datetime.now().strftime("%Y-%m-%d %H:%M:%S"), title, message, 1 if logged else 0, ",".join(delivery["sent"])),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute(
+            "INSERT INTO reminder_events (reminder_id, fired_at, title, message, logged, channels) VALUES (?, ?, ?, ?, ?, ?)",
+            (r["id"], datetime.now().strftime("%Y-%m-%d %H:%M:%S"), title, message, 1 if logged else 0, ",".join(delivery["sent"])),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     return {"title": title, "message": message, "logged": logged, **delivery}
 
 
@@ -323,40 +360,49 @@ def run_due(now: datetime | None = None) -> list:
     """Fire everything due at `now`. Safe to call repeatedly."""
     now = now or datetime.now()
     today = now.strftime("%Y-%m-%d")
-    fired = []
-    conn = _open()
-    rows = conn.execute("SELECT * FROM reminders WHERE enabled = 1").fetchall()
-    for row in rows:
-        r = _row(row)
-        if r["repeat"] == "once" and r["once_date"] and r["once_date"] < today:
-            conn.execute("UPDATE reminders SET enabled = 0 WHERE id = ?", (r["id"],))  # missed while offline
-            continue
-        if r["repeat"] == "once" and r["once_date"] != today:
-            continue
-        if r["last_fired_date"] == today:
-            continue
-        scheduled = datetime.strptime(f"{today} {r['remind_time']}", "%Y-%m-%d %H:%M")
-        if now < scheduled:
-            continue
-        # Claim this run atomically so two threads/processes can never double-fire.
-        claimed = conn.execute(
-            "UPDATE reminders SET last_fired_date = ? WHERE id = ? AND (last_fired_date IS NULL OR last_fired_date != ?)",
-            (today, r["id"], today),
-        ).rowcount
-        conn.commit()
-        if not claimed:
-            continue
-        if r["repeat"] == "once":
-            conn.execute("UPDATE reminders SET enabled = 0 WHERE id = ?", (r["id"],))
+    to_fire = []
+
+    with _reminders_write_lock:
+        conn = _open()
+        try:
+            rows = conn.execute("SELECT * FROM reminders WHERE enabled = 1").fetchall()
+            for row in rows:
+                r = _row(row)
+                if r["repeat"] == "once" and r["once_date"] and r["once_date"] < today:
+                    conn.execute("UPDATE reminders SET enabled = 0 WHERE id = ?", (r["id"],))  # missed while offline
+                    continue
+                if r["repeat"] == "once" and r["once_date"] != today:
+                    continue
+                if r["last_fired_date"] == today:
+                    continue
+                scheduled = datetime.strptime(f"{today} {r['remind_time']}", "%Y-%m-%d %H:%M")
+                if now < scheduled:
+                    continue
+                # Claim this run atomically so two threads/processes can never double-fire.
+                claimed = conn.execute(
+                    "UPDATE reminders SET last_fired_date = ? WHERE id = ? AND (last_fired_date IS NULL OR last_fired_date != ?)",
+                    (today, r["id"], today),
+                ).rowcount
+                if not claimed:
+                    continue
+                if r["repeat"] == "once":
+                    conn.execute("UPDATE reminders SET enabled = 0 WHERE id = ?", (r["id"],))
+                if now - scheduled > timedelta(minutes=GRACE_MINUTES):
+                    continue  # too late: skip today rather than log something stale
+                to_fire.append(r)
             conn.commit()
-        if now - scheduled > timedelta(minutes=GRACE_MINUTES):
-            continue  # too late: skip today rather than log something stale
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    fired = []
+    for r in to_fire:
         try:
             fired.append(fire_reminder(r))
         except Exception as exc:
             print(f"[reminders] failed to fire reminder {r['id']}: {exc}")
-    conn.commit()
-    conn.close()
     return fired
 
 
