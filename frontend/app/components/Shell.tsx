@@ -111,14 +111,19 @@ export default function Shell({ active, crumb, actions, className = "", children
   }, []);
 
   useEffect(() => {
-    fetch(`${API}/api/profile?_t=${Date.now()}`)
-      .then(r => r.json())
-      .then(p => {
-        setName(p.name || "");
-        if (p.photo_data) setPhotoData(p.photo_data);
-      })
-      .catch(() => {});
+    const loadProfile = () => {
+      fetch(`${API}/api/profile?_t=${Date.now()}`)
+        .then(r => r.json())
+        .then(p => {
+          setName(p.name || "");
+          setPhotoData(p.photo_data || null);
+        })
+        .catch(() => {});
+    };
+    loadProfile();
+    window.addEventListener("profile-updated", loadProfile);
     fetch(`${API}/api/patterns`).then(r => r.json()).then(d => setPatterns(d.patterns || [])).catch(() => {});
+    return () => window.removeEventListener("profile-updated", loadProfile);
   }, []);
 
   useEffect(() => {
@@ -245,7 +250,13 @@ export default function Shell({ active, crumb, actions, className = "", children
                 </div>
               )}
             </div>
-            <Link className="avatar avatar-link" href="/profile" aria-label="Open your profile" title="Your profile">{initial}</Link>
+            <Link className="avatar-link" href="/profile" aria-label="Open your profile" title="Your profile">
+              {photoData ? (
+                <img src={photoData} alt={display} className="avatar-img avatar" />
+              ) : (
+                <div className="avatar">{initial}</div>
+              )}
+            </Link>
           </div>
         </header>
         {children}

@@ -107,6 +107,7 @@ export default function ProfilePage() {
       });
       if (!res.ok) throw new Error("Failed to save profile photo.");
       await load();
+      window.dispatchEvent(new Event("profile-updated"));
       setNotice("Profile photo updated.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not upload photo.");
@@ -124,6 +125,7 @@ export default function ProfilePage() {
       const res = await fetch(`${API}/api/profile/photo`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to remove profile photo.");
       await load();
+      window.dispatchEvent(new Event("profile-updated"));
       setNotice("Profile photo removed.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not remove photo.");
@@ -159,6 +161,7 @@ export default function ProfilePage() {
       const data = await response.json();
       if (!response.ok) throw new Error(friendlyError(data.detail));
       await load();
+      window.dispatchEvent(new Event("profile-updated"));
       setEditing(false);
       setNotice(isNew ? "Profile created. Your daily targets are ready." : "Profile saved. Your daily targets were recalculated.");
     } catch (err) {
