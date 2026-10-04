@@ -2,7 +2,20 @@
 
 import Link from "next/link";
 import { ReactNode, useEffect, useRef, useState } from "react";
-import { Activity, AlarmClock, Bell, ChevronRight, Home, Leaf, MessageCircle, ShoppingCart, Sparkles, Utensils } from "lucide-react";
+import {
+  Activity,
+  AlarmClock,
+  Bell,
+  ChevronRight,
+  Home,
+  Leaf,
+  Menu,
+  MessageCircle,
+  ShoppingCart,
+  Sparkles,
+  Utensils,
+  X,
+} from "lucide-react";
 
 export const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
@@ -38,6 +51,28 @@ export default function Shell({ active, crumb, actions, className = "", children
   const [events, setEvents] = useState<ReminderEvent[]>([]);
   const [toasts, setToasts] = useState<ReminderEvent[]>([]);
   const lastEventId = useRef<number | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Prevent background scroll when mobile sidebar drawer is open
+  useEffect(() => {
+    if (sidebarOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [sidebarOpen]);
+
+  // Close drawer on Escape key press
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSidebarOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // Reminders that fire while a tab is open: show a toast (and a browser alert if allowed).
   useEffect(() => {
@@ -93,22 +128,65 @@ export default function Shell({ active, crumb, actions, className = "", children
 
   return (
     <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand"><span className="brand-badge"><Sparkles size={18} /></span>Nutri<span>Sync</span></div>
-        <Link className="workspace-card" href="/profile" aria-label="Open your profile">
+      {/* Backdrop overlay for mobile navigation drawer */}
+      <div
+        className={`mobile-drawer-overlay ${sidebarOpen ? "mobile-open" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
+      />
+
+      {/* Main navigation sidebar / mobile slide-out drawer */}
+      <aside className={`sidebar ${sidebarOpen ? "mobile-open" : ""}`} aria-label="Main Navigation">
+        <div className="brand">
+          <span className="brand-badge"><Sparkles size={18} /></span>
+          Nutri<span>Sync</span>
+          <button
+            type="button"
+            className="mobile-drawer-close"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close navigation menu"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <Link
+          className="workspace-card"
+          href="/profile"
+          aria-label="Open your profile"
+          onClick={() => setSidebarOpen(false)}
+        >
           <div className="avatar avatar-sm">{initial}</div>
           <div><b>{display}&apos;s space</b><small>Personal plan</small></div>
         </Link>
+
         <nav className="nav">
           {NAV.map(({ key, label, href, Icon }) => (
-            <Link className={key === active ? "nav-item active" : "nav-item"} href={href} key={key} aria-current={key === active ? "page" : undefined}>
+            <Link
+              className={key === active ? "nav-item active" : "nav-item"}
+              href={href}
+              key={key}
+              aria-current={key === active ? "page" : undefined}
+              onClick={() => setSidebarOpen(false)}
+            >
               <Icon size={18} />{label}
             </Link>
           ))}
         </nav>
+
         <div className="sidebar-footer">
-          <Link className={active === "chat" ? "nav-item active" : "nav-item"} href="/chat"><MessageCircle size={18} />Coach chat</Link>
-          <Link className={active === "profile" ? "profile-mini active" : "profile-mini"} href="/profile">
+          <Link
+            className={active === "chat" ? "nav-item active" : "nav-item"}
+            href="/chat"
+            onClick={() => setSidebarOpen(false)}
+          >
+            <MessageCircle size={18} />Coach chat
+          </Link>
+          <Link
+            className={active === "profile" ? "profile-mini active" : "profile-mini"}
+            href="/profile"
+            onClick={() => setSidebarOpen(false)}
+          >
             <div className="avatar">{initial}</div>
             <div><b>{display}</b><small>View profile</small></div>
           </Link>
@@ -117,7 +195,19 @@ export default function Shell({ active, crumb, actions, className = "", children
 
       <section className={`main-panel ${className}`.trim()}>
         <header className="topbar">
-          <div className="crumbs">My nutrition <ChevronRight size={15} /> <b>{crumb}</b></div>
+          <div className="topbar-left">
+            <button
+              type="button"
+              className="mobile-nav-toggle"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open navigation menu"
+              aria-expanded={sidebarOpen}
+            >
+              <Menu size={20} />
+            </button>
+            <div className="crumbs">My nutrition <ChevronRight size={15} /> <b>{crumb}</b></div>
+          </div>
+
           <div className="top-actions">
             {actions}
             <div className="notif-wrap" ref={bellRef}>
