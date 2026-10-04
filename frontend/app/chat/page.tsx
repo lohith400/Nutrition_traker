@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { AlarmClock, AlertTriangle, Camera, CheckCircle2, ExternalLink, MapPin, Mic, Plus, Search, Send, ShoppingCart, Sparkles, Square, Star, Trash2, Volume2, VolumeX, X } from "lucide-react";
+import { AlarmClock, AlertTriangle, Camera, CheckCircle2, Droplets, ExternalLink, MapPin, Mic, Plus, Search, Send, ShoppingCart, Sparkles, Square, Star, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import Shell, { API } from "../components/Shell";
 import { useVoiceChat } from "../hooks/useVoiceChat";
 
@@ -184,6 +184,17 @@ function ToolCard({ event }: { event: ToolEvent }) {
       return <div className="tool-card tool-card-warn"><AlertTriangle size={14} /> Not logged — {reason}</div>;
     }
     return <div className="tool-card tool-card-logged"><CheckCircle2 size={14} /> Logged <b>{String(result.matched_to)}</b> — {String(result.calories)} kcal, {String(result.protein_g)}g protein.</div>;
+  }
+  if (tool === "log_water") {
+    if (result.status !== "logged") {
+      const reason = String(result.error || result.message || result.status || "unknown error");
+      return <div className="tool-card tool-card-warn"><AlertTriangle size={14} /> Water not logged — {reason}</div>;
+    }
+    return (
+      <div className="tool-card tool-card-logged">
+        <Droplets size={14} /> Logged <b>{String(result.amount_l)} L water</b> · Today: {String(result.consumed_water_l)} L / {String(result.target_water_l)} L goal
+      </div>
+    );
   }
   return null;
 }

@@ -99,6 +99,7 @@ class OnboardingRequest(BaseModel):
     allergies: str = ""
     medical_conditions: str = ""
     sleep_schedule: str = ""
+    target_water_l: float | None = None
 
 
 class FoodLogRequest(BaseModel):
@@ -139,6 +140,12 @@ def save_onboarding(payload: OnboardingRequest):
     data = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
     bmr, tdee = math_engine.calculate_bmr_tdee(data["age"], data["sex"], data["height_cm"], data["current_weight_kg"], data["activity_level"])
     targets = math_engine.calculate_targets(tdee, data["goal"], data["current_weight_kg"])
+    if data.get("target_water_l") is not None and float(data["target_water_l"]) > 0:
+        targets["target_water_l"] = float(data["target_water_l"])
+    else:
+        existing = memory_agent.get_user_profile()
+        if existing and existing.get("target_water_l") and float(existing["target_water_l"]) > 0:
+            targets["target_water_l"] = float(existing["target_water_l"])
     profile = {**data, "bmr_kcal": bmr, "tdee_kcal": tdee, "onboarded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **targets}
     memory_agent.save_user_profile(profile)
     return {"status": "onboarded", **profile}
@@ -267,7 +274,7 @@ def log_food(payload: FoodLogRequest):
 
 
 @app.get("/api/suggestions")
-def get_suggestions(meal_type: str | None = None, whole_day: bool = False):
+def get_suggestions(meal_type: str | None = None, whole_day: bool = False, refresh: bool = False):
     budget = get_overview()
     if "error" in budget:
         return budget
@@ -276,8 +283,12 @@ def get_suggestions(meal_type: str | None = None, whole_day: bool = False):
         return menu_planner.suggest_day_plan(
             budget["remaining_calories"], budget["remaining_protein_g"],
             budget["remaining_carbs_g"], budget["remaining_fat_g"], diet,
+            randomize=True,
         )
-    return menu_planner.suggest_next_meal(budget["remaining_protein_g"], budget["remaining_calories"], diet, meal_type)
+    return menu_planner.suggest_next_meal(
+        budget["remaining_protein_g"], budget["remaining_calories"], diet, meal_type,
+        randomize=refresh,
+    )
 
 
 @app.get("/api/patterns")

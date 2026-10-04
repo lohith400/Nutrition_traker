@@ -37,8 +37,8 @@ export default function MealPlansPage() {
     setError("");
     try {
       const [planResponse, overviewResponse] = await Promise.all([
-        fetch(`${API}/api/suggestions?whole_day=true`),
-        fetch(`${API}/api/overview`),
+        fetch(`${API}/api/suggestions?whole_day=true&refresh=1&_t=${Date.now()}`),
+        fetch(`${API}/api/overview?_t=${Date.now()}`),
       ]);
       setPlan(await planResponse.json());
       setBudget(await overviewResponse.json());

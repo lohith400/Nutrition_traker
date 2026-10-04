@@ -38,10 +38,10 @@ _DEFAULT_DB = (
 DB_PATH = os.getenv("NUTRISYNC_DB_PATH", _DEFAULT_DB)
 
 _MEAL_ROLE_FIT = {
-    "breakfast": {"breakfast", "staple", "main", "drink"},
+    "breakfast": {"breakfast", "staple", "drink"},
     "lunch": {"main", "staple", "side"},
     "dinner": {"main", "staple", "side"},
-    "snack": {"snack", "breakfast", "drink", "side"},
+    "snack": {"snack", "drink", "side", "breakfast"},
 }
 
 
@@ -52,18 +52,22 @@ def _get_conn():
 
 
 def suggest_next_meal(remaining_protein_g: float, remaining_calories: float,
-                       diet: str = "any", meal_type: str | None = None) -> dict:
+                       diet: str = "any", meal_type: str | None = None,
+                       exclude_names: set | None = None,
+                       randomize: bool = False, count: int = 5) -> dict:
     """
     Rule-based selection over the real database only: if protein is short
     relative to remaining calories, prioritize high-protein-density foods;
     otherwise suggest balanced options. Deliberately rule-based rather than
     LLM-picked, so suggestions are always grounded in verified data.
     """
+    import random
+
+    if remaining_calories <= 0:
+        return {"status": "over_budget", "message": "Calorie budget for today is used up.", "options": []}
+
     conn = _get_conn()
     try:
-        if remaining_calories <= 0:
-            return {"status": "over_budget", "message": "Calorie budget for today is used up."}
-
         allowed = food_quality.allowed_diet_tags(diet)
         familiar = {r["food_code"]: r["times_logged"] for r in conn.execute(
             "SELECT food_code, times_logged FROM food_preferences"
@@ -80,10 +84,14 @@ def suggest_next_meal(remaining_protein_g: float, remaining_calories: float,
         conn.close()
 
     candidates = []
+    excluded_set = exclude_names or set()
     for r in rows:
+        fname = r["food_name"]
+        if fname in excluded_set:
+            continue
         if (r["diet_tag"] or "vegetarian") not in allowed:
             continue
-        role = food_quality.meal_role(r["food_name"])
+        role = food_quality.meal_role(fname)
         if role in ("excluded", "dessert"):
             continue
         if meal_type and role not in _MEAL_ROLE_FIT.get(meal_type, {"main", "staple", "snack", "side", "breakfast", "drink"}):
@@ -94,51 +102,81 @@ def suggest_next_meal(remaining_protein_g: float, remaining_calories: float,
             kcal, protein, label, qty = r["unit_serving_energy_kcal"], r["unit_serving_protein_g"] or 0, r["servings_unit"], 1
         else:
             kcal, protein, label, qty = r["energy_kcal_100g"], r["protein_g_100g"] or 0, "100g", 100
-        if kcal <= 0 or kcal > remaining_calories:
+
+        if kcal <= 10 or kcal > (remaining_calories * 1.25):
             continue
 
+        density = protein / kcal if kcal else 0
+        cal_diff = abs(kcal - (remaining_calories * 0.5)) / max(remaining_calories, 1.0)
+        protein_needed_ratio = remaining_protein_g / remaining_calories if remaining_calories > 0 else 0
+
+        if protein_needed_ratio > 0.04:
+            strategy = "high_protein_priority"
+            score = (density * 70.0) + (familiar.get(r["food_code"], 0) * 2.5) - (cal_diff * 4.0)
+        else:
+            strategy = "balanced"
+            score = (protein * 0.8) + (familiar.get(r["food_code"], 0) * 2.0) - (cal_diff * 4.0)
+
         candidates.append({
-            "food_name": r["food_name"],
+            "food_name": fname,
             "calories": round(kcal, 1),
             "protein_g": round(protein, 1),
             "quantity": qty,
             "unit": "serving" if has_serving else "grams",
             "serving_label": label,
-            "protein_density": protein / kcal if kcal else 0,
-            "familiarity": familiar.get(r["food_code"], 0),
+            "score": score,
         })
 
-    protein_needed_ratio = remaining_protein_g / remaining_calories if remaining_calories > 0 else 0
-    if protein_needed_ratio > 0.05:
-        strategy = "high_protein_priority"
-        candidates.sort(key=lambda c: (-c["protein_density"], -min(c["familiarity"], 5)))
+    if not candidates:
+        return {"status": "ok", "strategy": "none", "options": []}
+
+    candidates.sort(key=lambda c: -c["score"])
+
+    if randomize:
+        top_pool = candidates[:max(count * 4, 12)]
+        picks = random.sample(top_pool, min(count, len(top_pool)))
     else:
-        strategy = "balanced"
-        candidates.sort(key=lambda c: (-c["protein_g"], -min(c["familiarity"], 5)))
+        picks = candidates[:count]
 
-    options = candidates[:5]
-    for o in options:
-        o.pop("protein_density", None)
-        o.pop("familiarity", None)
+    for o in picks:
+        o.pop("score", None)
 
-    return {"status": "ok", "strategy": strategy, "options": options}
+    return {"status": "ok", "strategy": strategy if 'strategy' in locals() else "balanced", "options": picks}
 
 
 def suggest_day_plan(remaining_calories: float, remaining_protein_g: float,
                       remaining_carbs_g: float, remaining_fat_g: float,
-                      diet: str = "any") -> dict:
-    """Suggest one item per meal slot (breakfast/lunch/snack/dinner) from the
-    database only, roughly splitting the remaining budget across the day."""
+                      diet: str = "any", randomize: bool = True) -> dict:
+    """Suggest items per meal slot (breakfast/lunch/snack/dinner) from the
+    database only, splitting the remaining budget across the day without repeats."""
+    if remaining_calories <= 0:
+        return {
+            "status": "over_budget",
+            "message": "Calorie budget for today is used up.",
+            "plan": {"breakfast": [], "lunch": [], "snack": [], "dinner": []},
+            "plan_totals": {"calories": 0.0, "protein_g": 0.0},
+            "budget": {
+                "calories": remaining_calories, "protein_g": remaining_protein_g,
+                "carbs_g": remaining_carbs_g, "fat_g": remaining_fat_g,
+            },
+        }
+
     splits = {"breakfast": 0.25, "lunch": 0.35, "snack": 0.15, "dinner": 0.25}
     plan = {}
     total = {"calories": 0.0, "protein_g": 0.0}
+    used_names = set()
+
     for meal, share in splits.items():
-        result = suggest_next_meal(remaining_protein_g * share * 2, remaining_calories * share, diet, meal)
-        picks = result.get("options", [])[:2]
-        plan[meal] = picks
+        slot_kcal = remaining_calories * share
+        slot_prot = remaining_protein_g * share
+        result = suggest_next_meal(slot_prot, slot_kcal, diet, meal, exclude_names=used_names, randomize=randomize, count=2)
+        picks = result.get("options", [])
         for p in picks:
+            used_names.add(p["food_name"])
             total["calories"] += p["calories"]
             total["protein_g"] += p["protein_g"]
+        plan[meal] = picks
+
     return {
         "status": "ok",
         "plan": plan,

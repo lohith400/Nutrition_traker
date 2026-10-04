@@ -146,7 +146,8 @@ def allowed_diet_tags(diet) -> set:
 # --------------------------------------------------------------------------
 _EXCLUDE = re.compile(
     r"\b(pickle|chutney|powder|sauce|stock|syrup|dressing|jam|squash|dip|masala mix|"
-    r"paste|marinade|filling|essence|batter|dough|gravy base|puree|garnish|topping|cordial)\b",
+    r"paste|marinade|filling|essence|batter|dough|gravy base|puree|garnish|topping|cordial|"
+    r"aspic|jellied|jelly|gelatin|broth)\b",
     re.I,
 )
 _DESSERT = re.compile(
@@ -158,7 +159,7 @@ _DESSERT = re.compile(
 _DRINK = re.compile(r"\b(tea|coffee|lassi|milkshake|shake|smoothie|juice|sharbat|lemonade|panna|buttermilk|chaas|cold drink|kanji|egg nog)\b", re.I)
 _SOUP = re.compile(r"\b(soup|consomme|broth)\b", re.I)
 _STAPLE = re.compile(r"\b(roti|chapati|phulka|parantha|paratha|naan|rice|pulao|pulav|khichdi|khichri|biryani|bhaat|poori|bhatura|thepla|kulcha|jowar|bajra|ragi)\b", re.I)
-_BREAKFAST = re.compile(r"\b(idli|idly|dosa|uttapam|upma|poha|oats|oatmeal|porridge|daliya|dalia|cheela|chilla|appam|puttu|pesarattu|cornflakes|muesli|toast|dhokla|sandwich|sprouts?|paratha|parantha|thepla)\b", re.I)
+_BREAKFAST = re.compile(r"\b(idli|idly|dosa|uttapam|upma|poha|oats|oatmeal|porridge|daliya|dalia|cheela|chilla|appam|puttu|pesarattu|cornflakes|muesli|toast|dhokla|sandwich|sprouts?|paratha|parantha|thepla|egg|anda|omelet|omelette|bhurji)\b", re.I)
 _SNACK = re.compile(r"\b(chaat|chat|tikki|cutlet|pakora|pakoda|samosa|bhel|sundal|salad|sprouted|sprouts|tikka|shaslik|kabab|kebab|vada|dhokla|makhana|roll)\b", re.I)
 _SIDE = re.compile(r"\b(raita|salad|kachumber|soup)\b", re.I)
 

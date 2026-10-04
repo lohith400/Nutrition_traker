@@ -23,6 +23,7 @@ const SEX: Record<string, string> = { male: "Male", female: "Female" };
 type Form = {
   name: string; age: string; sex: string; height_cm: string; current_weight_kg: string; target_weight_kg: string;
   goal: string; activity_level: string; diet: string; allergies: string; medical_conditions: string; sleep_schedule: string;
+  target_water_l: string;
 };
 
 function toForm(p: Profile | null): Form {
@@ -32,6 +33,7 @@ function toForm(p: Profile | null): Form {
     target_weight_kg: p?.target_weight_kg ? String(p.target_weight_kg) : "",
     goal: p?.goal || "fat_loss", activity_level: p?.activity_level || "casual", diet: p?.diet || "any",
     allergies: p?.allergies || "", medical_conditions: p?.medical_conditions || "", sleep_schedule: p?.sleep_schedule || "",
+    target_water_l: p?.target_water_l ? String(p.target_water_l) : "6.5",
   };
 }
 
@@ -88,6 +90,7 @@ export default function ProfilePage() {
           name: form.name.trim(),
           age: Number(form.age), height_cm: Number(form.height_cm),
           current_weight_kg: Number(form.current_weight_kg), target_weight_kg: Number(form.target_weight_kg),
+          target_water_l: Number(form.target_water_l) || 6.5,
         }),
       });
       const data = await response.json();
@@ -144,6 +147,7 @@ export default function ProfilePage() {
               <label>Height (cm)<input required type="number" step="0.1" min={81} max={249} value={form.height_cm} onChange={e => change("height_cm", e.target.value)} /></label>
               <label>Current weight (kg)<input required type="number" step="0.1" min={26} max={299} value={form.current_weight_kg} onChange={e => change("current_weight_kg", e.target.value)} /></label>
               <label>Target weight (kg)<input required type="number" step="0.1" min={26} max={299} value={form.target_weight_kg} onChange={e => change("target_weight_kg", e.target.value)} /></label>
+              <label>Target water (L)<input required type="number" step="0.1" min={0.5} max={15} value={form.target_water_l} onChange={e => change("target_water_l", e.target.value)} /></label>
               <label>Goal<select value={form.goal} onChange={e => change("goal", e.target.value)}>{Object.entries(GOALS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
               <label>Activity<select value={form.activity_level} onChange={e => change("activity_level", e.target.value)}>{Object.entries(ACTIVITY).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
               <label>Diet<select value={form.diet} onChange={e => change("diet", e.target.value)}>{Object.entries(DIETS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>

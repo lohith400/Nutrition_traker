@@ -73,10 +73,12 @@ def _claims_logged(text: str) -> bool:
 
 
 def _log_succeeded(events: list) -> bool:
-    """True when this turn really saved something: a food log, or a grocery list change."""
+    """True when this turn really saved something: a food log, a water log, or a grocery list change."""
     for e in events:
         status = (e.get("result") or {}).get("status")
         if e.get("tool") == "log_food" and status == "logged":
+            return True
+        if e.get("tool") == "log_water" and status == "logged":
             return True
         if e.get("tool") in ("add_grocery_items", "remove_grocery_items") and status == "ok":
             return True
@@ -98,11 +100,8 @@ def _context():
     profile = memory_agent.get_user_profile()
     budget = math_engine.get_remaining_budget_today(today)
     meals = memory_agent.get_todays_logs()
-    # Long-term memory: re-check for behavioural patterns (e.g. recurring
-    # low breakfast protein, favourite foods, over/under-eating) on every
-    # turn and hand any findings to the model, so the coach can proactively
-    # mention them instead of only reacting to what's asked.
-    memory_agent.detect_patterns()
+    # Long-term memory: check patterns with throttle (at most once every 10 min)
+    memory_agent.maybe_detect_patterns(force=False)
     patterns = memory_agent.get_active_patterns()["patterns"]
     facts = memory_agent.get_user_facts()
     return {"profile": profile, "budget": budget, "meals": meals, "detected_patterns": patterns, "known_facts": facts}
@@ -227,6 +226,28 @@ TOOLS = [
                     },
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "log_water",
+            "description": (
+                "Log water intake for today. Call this whenever the user mentions drinking water or logging water, "
+                "e.g. 'I drank 3 liters of water', 'drank 250ml water', 'drank 2 glasses of water', 'log 500ml water'. "
+                "Convert the amount to liters (e.g. 3.0 for 3 liters, 0.25 for 250ml or 1 glass, 0.5 for 500ml). "
+                "Plain drinking water is NEVER a food item and must NEVER be looked up with lookup_food or log_food."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "amount_l": {
+                        "type": "number",
+                        "description": "Amount of water consumed in liters (e.g. 0.25 for 250ml, 0.5 for 500ml, 3.0 for 3 liters).",
+                    },
+                },
+                "required": ["amount_l"],
             },
         },
     },
@@ -413,6 +434,12 @@ def _tool_find_restaurants(args, location=None):
 
 
 def _tool_lookup_food(item_name, quantity=1, unit="serving"):
+    clean = (item_name or "").strip().lower()
+    if clean in ("water", "drinking water", "plain water", "mineral water", "glass of water", "tap water", "water glass") or re.match(r"^(\d+(\.\d+)?\s*(l|liter|liters|ml|glass|glasses)\s*)?(of\s*)?water$", clean):
+        return {
+            "status": "not_a_food",
+            "message": "Plain drinking water has zero calories and is tracked separately as water intake. Use the log_water tool with the amount in liters (e.g. 0.25 for a glass, 0.5 for 500ml, 3.0 for 3 liters) to log water.",
+        }
     diet = memory_agent.get_user_diet()
     match = rag_resolver.resolve_food(item_name, diet=diet)
     if match.get("status") != "matched":
@@ -421,6 +448,27 @@ def _tool_lookup_food(item_name, quantity=1, unit="serving"):
     if "error" in macros:
         return macros
     return {"status": "found", "match_confidence": match.get("confidence"), "match_method": match.get("match_method"), **macros}
+
+
+def _tool_log_water(amount_l):
+    try:
+        val = float(amount_l)
+        if val <= 0:
+            return {"status": "error", "message": "Amount of water must be greater than 0."}
+        memory_agent.log_water(val)
+        todays = memory_agent.get_todays_water()
+        profile = memory_agent.get_user_profile()
+        target = (profile.get("target_water_l") if profile else None) or 6.5
+        consumed = todays["consumed_water_l"]
+        return {
+            "status": "logged",
+            "amount_l": val,
+            "consumed_water_l": consumed,
+            "target_water_l": target,
+            "remaining_water_l": round(max(0.0, target - consumed), 2),
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 def _tool_suggest_meal(meal_type=None, whole_day=False):
@@ -520,6 +568,7 @@ TOOL_IMPL = {
     "analyze_grocery_meal": lambda args: _tool_analyze_grocery_meal(args.get("meal_name", "Meal"), args.get("ingredients") or []),
     "lookup_food": lambda args: _tool_lookup_food(args.get("item_name", ""), args.get("quantity", 1) or 1, args.get("unit") or "serving"),
     "log_food": lambda args: tool_log_food_item(args.get("item_name", ""), args.get("quantity", 1) or 1, args.get("meal_type") or "snack", args.get("unit") or "serving"),
+    "log_water": lambda args: _tool_log_water(args.get("amount_l") or 0),
     "get_today_summary": lambda args: _context(),
     "suggest_meal": lambda args: _tool_suggest_meal(args.get("meal_type"), bool(args.get("whole_day"))),
 }
@@ -566,6 +615,10 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
         "calories, protein, carbs and fat, then ask if they'd like it logged to today's meals and as "
         "which meal (breakfast/lunch/dinner/snack). Only call log_food once the user has clearly "
         "confirmed both the food and the unit.\n"
+        "WATER INTAKE: Plain drinking water has zero calories/macros and is tracked separately. "
+        "When the user mentions drinking water (e.g. 'I drank 3 liters of water', 'drank 250ml water', 'had a glass of water'), "
+        "ALWAYS call the log_water tool with the amount in liters (e.g. 3.0 for 3 liters, 0.25 for 250ml/1 glass, 0.5 for 500ml). "
+        "NEVER call lookup_food or log_food for plain water! Water is tracked strictly via log_water.\n"
         "NEVER say a food was logged/added/saved unless log_food returned status 'logged' in THIS turn. "
         "If the user confirms ('yes', 'log it', 'add it') you MUST call log_food -- do not just reply that it is done. "
         "If log_food fails, tell the user it was NOT logged and why. Never recite today's totals from memory: "
