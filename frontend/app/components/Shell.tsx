@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { Activity, AlarmClock, Bell, ChevronRight, Home, Leaf, MessageCircle, ShoppingCart, Sparkles, Utensils } from "lucide-react";
 
-export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
 export type NavKey = "overview" | "log" | "plans" | "grocery" | "reminders" | "progress" | "chat" | "profile";
 

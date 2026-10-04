@@ -19,6 +19,11 @@ which grade it got, so a bad source row is never silently presented as fact.
 """
 
 import sqlite3
+
+try:
+    from backend.database import get_db_connection
+except ImportError:  # run from inside backend/
+    from database import get_db_connection
 import os
 import difflib
 
@@ -61,7 +66,7 @@ _QUALITY_RANK = {"ok": 0, "grams_only": 1, "unreliable": 2}
 
 
 def _get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 

@@ -18,6 +18,11 @@ Guards applied to every suggestion:
 """
 
 import sqlite3
+
+try:
+    from backend.database import get_db_connection
+except ImportError:  # run from inside backend/
+    from database import get_db_connection
 import os
 
 try:
@@ -41,7 +46,7 @@ _MEAL_ROLE_FIT = {
 
 
 def _get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
