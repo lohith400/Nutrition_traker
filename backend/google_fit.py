@@ -2,6 +2,7 @@ import logging
 import os
 from datetime import datetime, time as dtime
 from pathlib import Path
+import sqlite3
 
 from dotenv import load_dotenv
 import httpx
@@ -175,7 +176,9 @@ DB_PATH = None
 
 
 def _get_conn():
-    return get_db_connection(DB_PATH)
+    conn = get_db_connection(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 async def sync_today_fitness(target_date: datetime | None = None) -> dict:

@@ -424,3 +424,42 @@ def test_retry_logic_on_idle_stream_error(tmp_path, monkeypatch):
         conn.execute("INSERT INTO daily_logs (log_date) VALUES ('2026-10-05')")
     assert attempts["INSERT"] == 1
 
+
+def test_fitness_under_turso_libsql(tmp_path, monkeypatch):
+    """Confirm daily_fitness upsert and get_fitness_history work under LibsqlConnection."""
+    import asyncio
+    from unittest.mock import patch
+    from backend import db_setup, google_fit
+
+    db_file = str(tmp_path / "turso_fitness.db")
+    monkeypatch.setenv("NUTRISYNC_FORCE_LIBSQL", "1")
+    monkeypatch.setattr(db_setup, "DB_PATH", db_file)
+    monkeypatch.setattr(google_fit, "DB_PATH", db_file)
+
+    db_setup.ensure_schema(db_file)
+
+    async def fake_summary(*a, **k):
+        return {
+            "status": "ok",
+            "date": "2026-10-01",
+            "steps": 4000,
+            "calories_burned": 300.0,
+            "running_minutes": 10.0,
+            "distance_km": 3.0,
+            "active_minutes": 20.0,
+        }
+
+    with patch.object(google_fit, "fetch_fitness_summary", fake_summary):
+        synced = asyncio.run(google_fit.sync_today_fitness())
+    assert synced["status"] == "ok"
+
+    history = google_fit.get_fitness_history(7)
+    assert len(history) == 1
+    assert history[0]["steps"] == 4000
+    assert history[0]["log_date"] == "2026-10-01"
+
+    today_stored = google_fit.get_today_stored_fitness("2026-10-01")
+    assert today_stored is not None
+    assert today_stored["steps"] == 4000
+
+
