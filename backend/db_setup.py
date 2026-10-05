@@ -203,6 +203,7 @@ MIGRATIONS = [
     ("daily_logs", "serving_label", "TEXT"),
     ("user_profile", "diet", "TEXT DEFAULT 'any'"),
     ("user_profile", "photo_data", "TEXT"),
+    ("daily_fitness", "extras", "TEXT"),
 ]
 
 

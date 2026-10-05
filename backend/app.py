@@ -30,9 +30,9 @@ for p in (DIR, ROOT):
         sys.path.insert(0, str(p))
 
 try:
-    from backend import db_setup, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
+    from backend import db_setup, energy_insights, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
 except ImportError:
-    import db_setup, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
+    import db_setup, energy_insights, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -196,6 +196,18 @@ async def get_today_fitness():
 @app.get("/api/fitness/history")
 def get_fitness_history(days: int = 7):
     return {"days": google_fit.get_fitness_history(days)}
+
+
+@app.post("/api/fitness/backfill")
+async def backfill_fitness(days: int = 14):
+    """Pull the last N days from Google Fit into daily_fitness (safe to repeat)."""
+    return await google_fit.sync_range(days)
+
+
+@app.get("/api/health/insights")
+def health_insights(days: int = 14):
+    """Deterministic energy-balance maths: intake vs burn, BMR/TDEE, pace, insights."""
+    return energy_insights.build_insights(days)
 
 
 @app.post("/api/log-water")

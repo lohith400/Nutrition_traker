@@ -424,3 +424,14 @@ def test_coach_fitness_tool_and_context(test_client):
     tool_res = orchestrator.TOOL_IMPL["get_fitness_summary"]({"days": 1})
     assert tool_res["status"] == "ok"
     assert "today" in tool_res or "days" in tool_res
+
+
+def test_health_insights_endpoint(test_client):
+    res = test_client.get("/api/health/insights?days=7")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] in ("ok", "unonboarded")
+    if data["status"] == "ok":
+        assert "math" in data
+        assert "bmr" in data["math"]
+        assert "rows" in data

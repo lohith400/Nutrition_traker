@@ -1,170 +1,111 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { Activity, AlertCircle, ArrowUpRight, Flame, Footprints, HeartPulse, RefreshCw, Sparkles, Timer } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Activity, AlertCircle, Bed, Flame, Footprints, HeartPulse, Info, MapPin, RefreshCw, Scale, Sparkles, Timer, Zap } from "lucide-react";
 import Shell, { API } from "../components/Shell";
-
-type FitnessDay = {
-  log_date: string;
-  steps: number;
-  calories_burned: number;
-  running_minutes: number;
-  distance_km: number | null;
-  active_minutes: number | null;
-  source: string;
-  synced_at: string;
-};
+import { ActivityMix, BalanceScale, FitnessDay, FoodLab, Extras, InsightList, Insights, MathPanel, PlateRings, Row, Tile, TrendChart, fmt, shortDay } from "./parts";
 
 type FitnessToday = {
-  status?: "ok" | "error" | "not_configured";
-  configured?: boolean;
-  date?: string;
-  steps: number;
-  calories_burned: number;
-  running_minutes: number;
-  distance_km?: number;
-  active_minutes?: number;
-  error?: string;
-  message?: string;
-  stored_steps?: number;
-  stored_calories_burned?: number;
-  synced_at?: string;
+  status?: "ok" | "error" | "not_configured"; configured?: boolean; date?: string;
+  steps: number; calories_burned: number; running_minutes: number; distance_km?: number; active_minutes?: number;
+  distance_source?: "google_fit" | "estimated"; extras?: Extras; error?: string; message?: string; synced_at?: string;
 };
 
 const RANGES = [7, 14, 30] as const;
-type Metric = "steps" | "calories";
-
-function ymd(date: Date): string {
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${m}-${d}`;
-}
-
-function lastDays(count: number): string[] {
-  const out: string[] = [];
-  for (let i = count - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    out.push(ymd(d));
-  }
-  return out;
-}
-
-function shortDay(iso: string): string {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" });
-}
+const SCOPE_NAMES: Record<string, string> = { body: "fitness.body.read (heart rate, weight)", sleep: "fitness.sleep.read (sleep)", location: "fitness.location.read (distance)", activity: "fitness.activity.read (move minutes, heart points)" };
 
 export default function HealthPage() {
   const [range, setRange] = useState<(typeof RANGES)[number]>(7);
-  const [metric, setMetric] = useState<Metric>("steps");
+  const [mode, setMode] = useState<"energy" | "steps">("energy");
   const [today, setToday] = useState<FitnessToday | null>(null);
   const [history, setHistory] = useState<FitnessDay[]>([]);
+  const [ins, setIns] = useState<Insights | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
+  const autoFilled = useRef(false);
 
-  async function loadData() {
+  async function loadData(r: number = range) {
     try {
-      const [todayRes, historyRes] = await Promise.all([
+      const [todayRes, historyRes, insRes] = await Promise.all([
         fetch(`${API}/api/fitness/today`),
-        fetch(`${API}/api/fitness/history?days=${range}`),
+        fetch(`${API}/api/fitness/history?days=${r}`),
+        fetch(`${API}/api/health/insights?days=${r}`).catch(() => null),
       ]);
-      if (todayRes.ok) setToday(await todayRes.json());
-      if (historyRes.ok) {
-        const histData = await historyRes.json();
-        setHistory(histData.days || []);
-      }
+      let t: FitnessToday | null = null;
+      if (todayRes.ok) { t = await todayRes.json(); setToday(t); }
+      let h: FitnessDay[] = [];
+      if (historyRes.ok) { h = (await historyRes.json()).days || []; setHistory(h); }
+      if (insRes && insRes.ok) { const j = await insRes.json(); setIns(j.status === "ok" ? j : null); }
+      setError("");
+      return { t, h };
     } catch {
       setError("Backend unavailable. Start FastAPI on port 8000.");
+      return { t: null, h: [] as FitnessDay[] };
     } finally {
       setLoading(false);
     }
   }
 
+  // Backfill past days from Google Fit (history only has days the app was opened otherwise).
+  async function backfill(r: number) {
+    try { await fetch(`${API}/api/fitness/backfill?days=${r}`, { method: "POST" }); } catch { /* optional */ }
+  }
+
   useEffect(() => {
-    loadData();
-  }, [range]);
+    loadData(range).then(async ({ t, h }) => {
+      if (!autoFilled.current && t?.status === "ok" && h.length < Math.min(range, 7)) {
+        autoFilled.current = true;
+        await backfill(Math.max(range, 14));
+        loadData(range);
+      }
+    });
+  }, [range]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function triggerSync() {
     setSyncing(true);
-    try {
-      const res = await fetch(`${API}/api/fitness/today`);
-      if (res.ok) {
-        setToday(await res.json());
-        const histRes = await fetch(`${API}/api/fitness/history?days=${range}`);
-        if (histRes.ok) {
-          const histData = await histRes.json();
-          setHistory(histData.days || []);
-        }
-      }
-    } catch {
-      setError("Sync failed. Check backend connection.");
-    } finally {
-      setSyncing(false);
-    }
+    try { await backfill(range); await loadData(range); } catch { setError("Sync failed. Check backend connection."); } finally { setSyncing(false); }
   }
 
-  const stepGoal = 10000;
-  const calGoal = 2000;
-  const target = metric === "steps" ? stepGoal : calGoal;
-  const unit = metric === "steps" ? "steps" : "kcal";
-
-  const series = useMemo(() => {
-    const byDate = new Map(history.map(d => [d.log_date, d]));
-    return lastDays(range).map(date => {
-      const entry = byDate.get(date);
-      const value = entry ? (metric === "steps" ? entry.steps : entry.calories_burned) : 0;
-      return { date, value, tracked: Boolean(entry && entry.steps > 0) };
-    });
-  }, [history, range, metric]);
-
-  const stats = useMemo(() => {
-    const trackedDays = history.filter(d => d.steps > 0);
-    const count = trackedDays.length;
-    const avgSteps = count ? trackedDays.reduce((sum, d) => sum + d.steps, 0) / count : 0;
-    const avgCal = count ? trackedDays.reduce((sum, d) => sum + d.calories_burned, 0) / count : 0;
-    const daysGoalMet = history.filter(d => d.steps >= stepGoal).length;
-    return { count, avgSteps, avgCal, daysGoalMet };
-  }, [history]);
-
-  const chartMax = Math.max(target * 1.25, ...series.map(s => s.value), 100);
-
+  const ex = today?.extras ?? {};
+  const missing = new Set(ex.missing ?? []);
   const stepsToday = today?.steps || 0;
-  const caloriesToday = today?.calories_burned || 0;
-  const runningToday = today?.running_minutes || 0;
-  const distanceToday = today?.distance_km ?? (stepsToday > 0 ? Math.round(stepsToday * 0.00075 * 10) / 10 : 0);
-
+  const kcalToday = today?.calories_burned || 0;
+  const activeToday = ex.move_minutes ?? today?.active_minutes ?? today?.running_minutes ?? 0;
+  const distanceToday = today?.distance_km ?? (stepsToday > 0 ? Math.round(stepsToday * 0.00075 * 100) / 100 : 0);
   const isConfigured = today?.configured !== false && today?.status !== "not_configured";
+  const todayRow = ins?.rows.find(r => r.is_today);
+  const eatenToday = todayRow?.eaten ?? 0;
+  const kcalGoal = ins?.math.tdee || 2000;
+
+  // Rows for the chart: prefer the backend's joined rows, fall back to Fit history only.
+  const rows: Row[] = useMemo(() => {
+    if (ins) return ins.rows.slice(-range);
+    return history.map(d => ({ date: d.log_date, is_today: false, eaten: 0, burned: Math.round(d.calories_burned), steps: d.steps,
+      protein_g: 0, carbs_g: 0, fat_g: 0, water_l: 0, has_food: false, has_fit: d.steps > 0, balance: null }));
+  }, [ins, history, range]);
+
+  const spark = (pick: (d: FitnessDay) => number | undefined) => history.map(d => pick(d) ?? 0);
+  const trackedDays = history.filter(d => d.steps > 0).length;
+  const sleep = ex.sleep_minutes ? `${Math.floor(ex.sleep_minutes / 60)}h ${ex.sleep_minutes % 60}m` : undefined;
+  const missingList = [...missing].filter(g => SCOPE_NAMES[g]);
 
   return (
     <Shell active="health" crumb="Health">
-      <div className="page-wrap">
+      <div className="page-wrap hx-page">
         <div className="hero-row">
           <div>
             <h1>Health &amp; Movement <span>✦</span></h1>
-            <p className="subtitle">Daily physical activity, steps, and energy expenditure tracked with Google Fit.</p>
+            <p className="subtitle">What you eat, what you burn, and what it means for you, from your food log and Google Fit.</p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={triggerSync}
-              disabled={syncing}
-              style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "8px 14px" }}
-            >
+            {today?.status === "ok" && <span className="hx-live"><i />Google Fit{today.synced_at ? ` · ${today.synced_at.slice(11, 16)}` : " · live"}</span>}
+            <button type="button" className="ghost-btn hx-sync" onClick={triggerSync} disabled={syncing}>
               <RefreshCw size={14} className={syncing ? "spin" : ""} /> {syncing ? "Syncing..." : "Sync Fit"}
             </button>
             <div className="segmented" role="group" aria-label="Time range">
               {RANGES.map(r => (
-                <button
-                  key={r}
-                  className={r === range ? "seg active" : "seg"}
-                  onClick={() => setRange(r)}
-                  aria-pressed={r === range}
-                >
-                  {r} days
-                </button>
+                <button key={r} className={r === range ? "seg active" : "seg"} onClick={() => setRange(r)} aria-pressed={r === range}>{r} days</button>
               ))}
             </div>
           </div>
@@ -194,144 +135,97 @@ export default function HealthPage() {
           </div>
         )}
 
-        <div className="stats-grid progress-stats">
-          <div className="stat-card">
-            <div className="stat-topline"><span className="stat-icon emerald"><Footprints size={16} /></span>Today&apos;s Steps</div>
-            <div className="stat-number">{stepsToday.toLocaleString()}<small> / {stepGoal.toLocaleString()}</small></div>
-            <div className="progress-track"><span className="progress-fill emerald" style={{ width: `${Math.min(100, (stepsToday / stepGoal) * 100)}%` }} /></div>
-            <div className="stat-meta"><span>{Math.round((stepsToday / stepGoal) * 100)}% of goal</span><b>{stepGoal.toLocaleString()}</b></div>
-          </div>
-
-          <div className="stat-card">
-            <div className="stat-topline"><span className="stat-icon orange"><Flame size={16} /></span>Calories Burned</div>
-            <div className="stat-number">{Math.round(caloriesToday)}<small> kcal</small></div>
-            <div className="progress-track"><span className="progress-fill orange" style={{ width: `${Math.min(100, (caloriesToday / calGoal) * 100)}%` }} /></div>
-            <div className="stat-meta"><span>Active burn</span><b>Goal {calGoal} kcal</b></div>
-          </div>
-
-          <div className="stat-card">
-            <div className="stat-topline"><span className="stat-icon purple"><Timer size={16} /></span>Running / Active</div>
-            <div className="stat-number">{runningToday}<small> min</small></div>
-            <div className="progress-track"><span className="progress-fill purple" style={{ width: `${Math.min(100, (runningToday / 30) * 100)}%` }} /></div>
-            <div className="stat-meta"><span>Exercise time</span><b>Goal 30 min</b></div>
-          </div>
-
-          <div className="stat-card">
-            <div className="stat-topline"><span className="stat-icon cyan"><Activity size={16} /></span>Distance</div>
-            <div className="stat-number">{distanceToday}<small> km</small></div>
-            <div className="progress-track"><span className="progress-fill cyan" style={{ width: `${Math.min(100, (distanceToday / 8) * 100)}%` }} /></div>
-            <div className="stat-meta"><span>Estimated walk</span><b>Goal 8 km</b></div>
-          </div>
+        {/* ---- Hero: the scale and the plate ---- */}
+        <div className="hx-hero">
+          <section className="hx-card hx-warm">
+            <div className="hx-card-head"><div><h3>Energy balance</h3><p>Food on one pan, movement on the other (today so far)</p></div></div>
+            <BalanceScale eaten={eatenToday} burned={Math.round(kcalToday)} />
+            {!ins && <p className="hx-fine">Log meals in Food log to see both sides of the scale.</p>}
+          </section>
+          <section className="hx-card hx-sage">
+            <div className="hx-card-head"><div><h3>Today&apos;s plate</h3><p>Three rings, one plate. Hover a ring for detail</p></div></div>
+            <PlateRings steps={stepsToday} kcal={Math.round(kcalToday)} active={activeToday} kcalGoal={kcalGoal} />
+          </section>
         </div>
 
-        <section className="panel chart-panel">
+        {/* ---- Everything Google Fit gives us ---- */}
+        <div className="hx-section-title"><h2>From Google Fit</h2><p>Today, with the last {Math.max(history.length, 1)} days as a trend line</p></div>
+        <div className="hx-tiles">
+          <Tile icon={<Footprints size={16} />} color="#c99a2e" label="Steps" num={stepsToday} sub={`${Math.round(stepsToday / 100)}% of 10,000`} spark={spark(d => d.steps)} />
+          <Tile icon={<MapPin size={16} />} color="#3f8f86" label="Distance" num={distanceToday} decimals={1} unit="km" sub={today?.distance_source === "google_fit" ? "Measured by Fit" : "Estimated from steps"} spark={spark(d => d.distance_km ?? 0)} />
+          <Tile icon={<Flame size={16} />} color="#d0704f" label="Calories burned" num={Math.round(kcalToday)} unit="kcal" sub="Resting + active" spark={spark(d => d.calories_burned)} />
+          <Tile icon={<Timer size={16} />} color="#6b4fb8" label="Move minutes" num={activeToday} unit="min" sub="Goal 30 min" spark={spark(d => d.active_minutes ?? 0)} />
+          <Tile icon={<Zap size={16} />} color="#2f7d5b" label="Heart points" num={ex.heart_points ?? null} decimals={0} sub="Goal 150 / week" spark={spark(d => d.extras?.heart_points)} missing={missing.has("activity")} hint="Needs activity scope" />
+          <Tile icon={<HeartPulse size={16} />} color="#c4506b" label="Heart rate" num={ex.hr_avg ?? null} unit="bpm" sub={ex.hr_min ? `Range ${ex.hr_min}–${ex.hr_max} bpm` : undefined} spark={spark(d => d.extras?.hr_avg)} missing={missing.has("body")} hint="Needs body scope" />
+          <Tile icon={<Bed size={16} />} color="#5a74b8" label="Sleep" text={sleep} sub="Last night" spark={spark(d => d.extras?.sleep_minutes)} missing={missing.has("sleep")} hint="Needs sleep scope" />
+          <Tile icon={<Scale size={16} />} color="#8a6a3a" label="Weight" num={ex.weight_kg ?? null} decimals={1} unit="kg" sub={ins ? `Target ${ins.profile.target_weight_kg} kg` : "Latest reading"} spark={spark(d => d.extras?.weight_kg)} missing={missing.has("body")} hint="Needs body scope" />
+        </div>
+        {missingList.length > 0 && (
+          <div className="hx-note"><Info size={15} />
+            <span>Google did not return {missingList.map(g => g).join(", ")} data. Either your watch/phone doesn&apos;t record it, or your refresh token was created without these scopes: {missingList.map(g => SCOPE_NAMES[g]).join(", ")}. Re-authorize with them in OAuth Playground and update the refresh token in <code>backend/.env</code>.</span>
+          </div>
+        )}
+
+        {/* ---- Trend ---- */}
+        <section className="hx-card hx-chart-card">
           <div className="panel-head">
             <div>
-              <h3>Daily {metric === "steps" ? "steps" : "calories burned"}</h3>
-              <p>Dashed line marks your {target.toLocaleString()} {unit} target. Showing activity over the last {range} days.</p>
+              <h3>{mode === "energy" ? "Eaten vs burned" : "Daily steps"}</h3>
+              <p>{mode === "energy" ? `Bars are what you burned, the line is what you ate. Numbers under each day are the balance. Last ${range} days.` : `Dashed line is your 10,000 step goal. Last ${range} days.`}</p>
             </div>
             <div className="segmented" role="group" aria-label="Chart metric">
-              <button
-                className={metric === "steps" ? "seg active" : "seg"}
-                onClick={() => setMetric("steps")}
-                aria-pressed={metric === "steps"}
-              >
-                Steps
-              </button>
-              <button
-                className={metric === "calories" ? "seg active" : "seg"}
-                onClick={() => setMetric("calories")}
-                aria-pressed={metric === "calories"}
-              >
-                Calories Burned
-              </button>
+              <button className={mode === "energy" ? "seg active" : "seg"} onClick={() => setMode("energy")} aria-pressed={mode === "energy"}>Energy</button>
+              <button className={mode === "steps" ? "seg active" : "seg"} onClick={() => setMode("steps")} aria-pressed={mode === "steps"}>Steps</button>
             </div>
           </div>
-
-          {loading ? (
-            <p className="empty-state">Loading activity data…</p>
-          ) : stats.count === 0 && stepsToday === 0 ? (
-            <p className="empty-state">
-              No fitness data recorded yet for the last {range} days. Once Google Fit is synced, your daily steps and calories will appear here automatically.
-            </p>
-          ) : (
-            <div className="bar-chart" role="img" aria-label={`Daily ${metric} for the last ${range} days`}>
-              {target > 0 && (
-                <span className="goal-line" style={{ bottom: `calc(18px + (100% - 18px) * ${target / chartMax})` }} />
-              )}
-              {series.map((point, index) => (
-                <div
-                  className="bar-col"
-                  key={point.date}
-                  title={`${shortDay(point.date)}: ${point.value ? `${point.value.toLocaleString()} ${unit}` : "0"}`}
-                >
-                  <div className="bar-slot">
-                    <span
-                      className={`bar ${metric === "steps" ? "emerald-bar" : "orange-bar"} ${point.value >= target ? "over" : ""}`}
-                      style={{ height: `${point.value > 0 ? Math.max(3, (point.value / chartMax) * 100) : 0}%` }}
-                    />
-                  </div>
-                  <small>{range <= 14 || index % 5 === 0 || index === series.length - 1 ? shortDay(point.date) : ""}</small>
-                </div>
-              ))}
-            </div>
-          )}
+          {loading ? <p className="empty-state">Loading activity data…</p>
+            : trackedDays === 0 && stepsToday === 0 ? <p className="empty-state">No fitness data recorded yet for the last {range} days. Press Sync Fit and your history will fill in.</p>
+            : <TrendChart rows={rows} mode={mode} target={mode === "steps" ? 10000 : kcalGoal} calTarget={mode === "energy" ? ins?.profile.target_calories : undefined} />}
         </section>
 
-        <div className="content-grid progress-grid">
-          <section className="panel">
-            <div className="panel-head">
-              <div>
-                <h3>Movement Summary</h3>
-                <p>Activity stats over {range} days</p>
-              </div>
-            </div>
-            <div style={{ display: "grid", gap: "14px", marginTop: "14px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: "10px" }}>
-                <span style={{ fontSize: "12px", color: "var(--muted)" }}>Days tracked</span>
-                <b style={{ fontSize: "13px" }}>{stats.count} of {range} days</b>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: "10px" }}>
-                <span style={{ fontSize: "12px", color: "var(--muted)" }}>Average daily steps</span>
-                <b style={{ fontSize: "13px" }}>{Math.round(stats.avgSteps).toLocaleString()} steps</b>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: "10px" }}>
-                <span style={{ fontSize: "12px", color: "var(--muted)" }}>Average daily burn</span>
-                <b style={{ fontSize: "13px" }}>{Math.round(stats.avgCal)} kcal</b>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", paddingBottom: "4px" }}>
-                <span style={{ fontSize: "12px", color: "var(--muted)" }}>10,000 steps achieved</span>
-                <b style={{ fontSize: "13px", color: stats.daysGoalMet > 0 ? "#1e7e4f" : "inherit" }}>{stats.daysGoalMet} days</b>
-              </div>
-            </div>
-          </section>
+        {/* ---- Maths + insights ---- */}
+        {ins ? (
+          <div className="hx-split">
+            <section className="hx-card">
+              <div className="hx-card-head"><div><h3>Your energy maths, step by step</h3><p>Every number comes from your profile, food log and Google Fit. No guessing</p></div></div>
+              <MathPanel ins={ins} />
+            </section>
+            <section className="hx-card">
+              <div className="hx-card-head"><div><h3>What this means for you</h3><p>Plain-language readout of the last {ins.math.days_used || 0} complete days</p></div></div>
+              <InsightList items={ins.insights} />
+            </section>
+          </div>
+        ) : !loading && (
+          <section className="hx-card"><p className="empty-state">Personal energy maths needs your profile (Profile page) and the updated backend. Restart uvicorn after pulling the new files.</p></section>
+        )}
 
-          <section className="panel">
-            <div className="panel-head">
-              <div>
-                <h3>Recent Activity Log</h3>
-                <p>Recorded in NutriSync</p>
-              </div>
-            </div>
+        {/* ---- Food lab ---- */}
+        <section className="hx-card hx-warm hx-labcard">
+          <div className="hx-card-head"><div><h3>Food lab</h3><p>See your movement as food, and test a snack before you eat it</p></div></div>
+          <FoodLab burned={kcalToday} eaten={eatenToday} avgBalance={ins ? ins.math.avg_balance : null} walk={ins?.walk ?? null} weight={ins?.profile.weight_kg ?? null} />
+        </section>
+
+        {/* ---- Activity mix + log ---- */}
+        <div className="hx-split even">
+          <section className="hx-card">
+            <div className="hx-card-head"><div><h3>How you moved today</h3><p>Minutes per activity from Google Fit</p></div></div>
+            <ActivityMix acts={ex.activities ?? {}} />
+          </section>
+          <section className="hx-card">
+            <div className="hx-card-head"><div><h3>Recent Activity Log</h3><p>Recorded in NutriSync</p></div></div>
             {history.length === 0 ? (
               <p className="empty-state">Daily history entries will appear here as Google Fit syncs.</p>
             ) : (
               <div className="meal-list">
-                {history.slice(-5).reverse().map(item => (
+                {history.slice(-6).reverse().map(item => (
                   <div className="meal-row" key={item.log_date}>
-                    <div className="meal-icon mint"><Footprints size={18} /></div>
+                    <div className="meal-icon mint"><Activity size={18} /></div>
                     <div className="meal-info">
                       <b>{shortDay(item.log_date)}</b>
-                      <span>{item.source} · {item.running_minutes ? `${item.running_minutes}m run` : "movement"}</span>
+                      <span>{item.distance_km ? `${item.distance_km} km` : "movement"}{item.extras?.move_minutes ? ` · ${item.extras.move_minutes} min active` : ""}{item.extras?.sleep_minutes ? ` · ${Math.floor(item.extras.sleep_minutes / 60)}h sleep` : ""}</span>
                     </div>
-                    <div className="macro-box">
-                      <b>{item.steps.toLocaleString()}</b>
-                      <span>steps</span>
-                    </div>
-                    <div className="macro-box protein-box">
-                      <b>{Math.round(item.calories_burned)}</b>
-                      <span>kcal</span>
-                    </div>
+                    <div className="macro-box"><b>{item.steps.toLocaleString()}</b><span>steps</span></div>
+                    <div className="macro-box protein-box"><b>{fmt(item.calories_burned)}</b><span>kcal</span></div>
                   </div>
                 ))}
               </div>
