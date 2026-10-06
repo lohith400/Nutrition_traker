@@ -99,16 +99,85 @@ export function useVoiceChat({ onUtterance, lang = "en-IN" }: Options) {
     setSupported(getRecognitionCtor() !== null);
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     const pickVoice = () => {
+      if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
       const voices = window.speechSynthesis.getVoices();
-      voiceRef.current =
-        voices.find(v => v.lang === lang) ||
-        voices.find(v => v.lang.replace("_", "-").toLowerCase().startsWith("en-in")) ||
-        voices.find(v => v.lang.toLowerCase().startsWith("en")) ||
-        null;
+      if (!voices || voices.length === 0) return;
+
+      // Prioritize warm, human-like English voices
+      const preferredNames = [
+        "Google UK English Female",
+        "Google US English",
+        "Samantha",
+        "Natural",
+        "Microsoft Aria Online",
+        "Microsoft Jenny Online",
+        "Microsoft Guy Online",
+        "Jenny",
+        "Guy",
+        "Aria",
+        "Serena",
+        "Karen",
+        "Moira",
+        "Daniel",
+      ];
+
+      let picked: SpeechSynthesisVoice | null = null;
+
+      // 1. Check exact or substring match in preferredNames for English
+      for (const target of preferredNames) {
+        const found = voices.find(
+          v => v.name.toLowerCase().includes(target.toLowerCase()) && v.lang.toLowerCase().startsWith("en")
+        );
+        if (found) {
+          picked = found;
+          break;
+        }
+      }
+
+      // 2. High-quality / Natural / Neural voices
+      if (!picked) {
+        picked =
+          voices.find(
+            v =>
+              v.lang.toLowerCase().startsWith("en") &&
+              (v.name.toLowerCase().includes("natural") ||
+                v.name.toLowerCase().includes("neural") ||
+                v.name.toLowerCase().includes("online"))
+          ) || null;
+      }
+
+      // 3. Exact language match or specified lang
+      if (!picked && lang) {
+        picked = voices.find(v => v.lang === lang) || null;
+      }
+
+      // 4. Fallback to en-IN, en-GB, en-US, or any English
+      if (!picked) {
+        picked =
+          voices.find(v => v.lang.replace("_", "-").toLowerCase().startsWith("en-in")) ||
+          voices.find(v => v.lang.replace("_", "-").toLowerCase().startsWith("en-gb")) ||
+          voices.find(v => v.lang.replace("_", "-").toLowerCase().startsWith("en-us")) ||
+          voices.find(v => v.lang.toLowerCase().startsWith("en")) ||
+          voices[0] ||
+          null;
+      }
+
+      voiceRef.current = picked;
     };
+
     pickVoice();
-    window.speechSynthesis.addEventListener("voiceschanged", pickVoice);
-    return () => window.speechSynthesis.removeEventListener("voiceschanged", pickVoice);
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.onvoiceschanged = pickVoice;
+      window.speechSynthesis.addEventListener("voiceschanged", pickVoice);
+    }
+    return () => {
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.removeEventListener("voiceschanged", pickVoice);
+        if (window.speechSynthesis.onvoiceschanged === pickVoice) {
+          window.speechSynthesis.onvoiceschanged = null;
+        }
+      }
+    };
   }, [lang]);
 
   const halt = useCallback((message = "") => {
@@ -136,7 +205,9 @@ export function useVoiceChat({ onUtterance, lang = "en-IN" }: Options) {
       const utterance = new SpeechSynthesisUtterance(chunks[index++]);
       utterance.lang = voiceRef.current?.lang || lang;
       if (voiceRef.current) utterance.voice = voiceRef.current;
-      utterance.rate = 1.02;
+      utterance.pitch = 1.02;
+      utterance.rate = 0.98;
+      utterance.volume = 1.0;
       utterance.onend = next;
       utterance.onerror = () => resolve();
       window.speechSynthesis.speak(utterance);

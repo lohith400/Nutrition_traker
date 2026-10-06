@@ -38,7 +38,7 @@ type ChatMsg = {
   pending?: boolean;
   image?: string;
 };
-type Profile = { name?: string };
+type Profile = { name?: string; photo_data?: string | null };
 type ChatDay = { date: string; messages: number; preview: string };
 
 /** Shrinks a photo to max 1024px and re-encodes as JPEG so uploads stay small and fast. */
@@ -373,11 +373,11 @@ function NeedLocationCard({
       </p>
 
       <div className="need-loc-actions">
-        <button type="button" className="primary-btn small" onClick={onRetryWithGps}>
+        <button type="button" className="primary-btn small active:scale-95 transition-transform duration-150" onClick={onRetryWithGps}>
           <MapPin size={13} /> Use Current GPS
         </button>
         {sampleAreas.map((area) => (
-          <button key={area} type="button" className="area-chip" onClick={() => onPickArea(area)}>
+          <button key={area} type="button" className="area-chip active:scale-95 transition-transform duration-150" onClick={() => onPickArea(area)}>
             {area}
           </button>
         ))}
@@ -687,6 +687,7 @@ function ToolCard({
 
 export default function ChatPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -736,11 +737,22 @@ export default function ChatPage() {
     const saved = loadStoredCoords();
     if (saved) setCoords(saved);
 
-    fetch(`${API}/api/profile`)
-      .then((r) => r.json())
-      .then(setProfile)
-      .catch(() => {});
+    const loadProfileData = () => {
+      fetch(`${API}/api/profile?_t=${Date.now()}`)
+        .then((r) => r.json())
+        .then((p) => {
+          setProfile(p);
+          setAvatarFailed(false);
+        })
+        .catch(() => {});
+    };
+
+    loadProfileData();
+    window.addEventListener("profile-updated", loadProfileData);
     loadDays();
+    return () => {
+      window.removeEventListener("profile-updated", loadProfileData);
+    };
   }, [loadDays]);
 
   // Each day is its own chat page: switching the day loads only that day's messages.
@@ -938,7 +950,7 @@ export default function ChatPage() {
               key={day.date}
               role="tab"
               aria-selected={day.date === selectedDate}
-              className={`chat-day-chip ${day.date === selectedDate ? "active" : ""}`}
+              className={`chat-day-chip ${day.date === selectedDate ? "active" : ""} active:scale-95 transition-transform duration-150`}
               onClick={() => pickDay(day.date)}
               title={day.preview || "No messages yet"}
             >
@@ -951,6 +963,73 @@ export default function ChatPage() {
         </div>
 
         <div className="chat-panel">
+          {/* Ambient Background Nutrition Motifs (Vintage botanical line-art sketches) */}
+          <div className="chat-ambient-motifs" aria-hidden="true">
+            <svg
+              className="motif motif-wheat"
+              viewBox="0 0 80 140"
+              fill="none"
+              stroke="#234236"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M40 135 C40 90, 42 45, 40 10" />
+              <path d="M40 105 C31 99, 24 90, 28 82 C34 85, 38 93, 40 99" />
+              <path d="M40 99 C49 93, 56 84, 52 76 C46 79, 42 87, 40 93" />
+              <path d="M40 82 C31 76, 24 67, 28 59 C34 62, 38 70, 40 76" />
+              <path d="M40 76 C49 70, 56 61, 52 53 C46 56, 42 64, 40 70" />
+              <path d="M40 59 C31 53, 24 44, 28 36 C34 39, 38 47, 40 53" />
+              <path d="M40 53 C49 47, 56 38, 52 30 C46 33, 42 41, 40 47" />
+              <path d="M40 36 C33 30, 28 22, 32 15 C37 18, 38 26, 40 30" />
+              <path d="M40 30 C47 24, 52 16, 48 9 C43 12, 42 20, 40 24" />
+              <path d="M40 16 C39 8, 41 4, 40 2" />
+            </svg>
+            <svg
+              className="motif motif-helix"
+              viewBox="0 0 100 100"
+              fill="none"
+              stroke="#234236"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+            >
+              <ellipse cx="50" cy="50" rx="38" ry="19" transform="rotate(-25 50 50)" />
+              <ellipse cx="50" cy="50" rx="19" ry="38" transform="rotate(-25 50 50)" />
+              <circle cx="50" cy="50" r="5" strokeWidth="1" />
+              <circle cx="26" cy="38" r="2.5" fill="#234236" fillOpacity="0.4" />
+              <circle cx="74" cy="62" r="2.5" fill="#234236" fillOpacity="0.4" />
+              <circle cx="62" cy="26" r="2.5" fill="#234236" fillOpacity="0.4" />
+              <circle cx="38" cy="74" r="2.5" fill="#234236" fillOpacity="0.4" />
+            </svg>
+            <svg
+              className="motif motif-pod"
+              viewBox="0 0 90 90"
+              fill="none"
+              stroke="#234236"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M15 75 C25 65, 40 50, 75 15 C60 40, 45 65, 15 75 Z" />
+              <path d="M22 68 C35 60, 55 45, 68 22" strokeDasharray="2 3" />
+              <circle cx="35" cy="55" r="4" />
+              <circle cx="48" cy="42" r="4" />
+              <circle cx="61" cy="29" r="4" />
+            </svg>
+            <svg
+              className="motif motif-droplet"
+              viewBox="0 0 60 80"
+              fill="none"
+              stroke="#234236"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M30 10 C30 10, 10 40, 10 54 C10 65, 19 74, 30 74 C41 74, 50 65, 50 54 C50 40, 30 10, 30 10 Z" />
+              <path d="M22 50 C20 54, 20 60, 24 64" strokeWidth="1" />
+            </svg>
+          </div>
+
           <div className="chat-messages" ref={listRef}>
             {!historyLoaded && <p className="empty-state">Loading conversation…</p>}
             {historyLoaded && messages.length === 0 && (
@@ -972,7 +1051,22 @@ export default function ChatPage() {
               const isLastMessage = index === messages.length - 1;
               return (
                 <div className={`chat-row ${message.role}`} key={index}>
-                  <div className="chat-avatar">{message.role === "user" ? initial : <Sparkles size={14} />}</div>
+                  <div className={`chat-avatar ${message.role === "user" ? "user-av" : "coach-av"}`}>
+                    {message.role === "user" ? (
+                      profile?.photo_data && !avatarFailed ? (
+                        <img
+                          src={profile.photo_data}
+                          alt={name}
+                          onError={() => setAvatarFailed(true)}
+                          className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-[#234236]/20 shadow-xs user-av-img"
+                        />
+                      ) : (
+                        <span className="user-initial-fallback">{initial}</span>
+                      )
+                    ) : (
+                      <Sparkles size={14} />
+                    )}
+                  </div>
                   <div className="chat-bubble-col">
                     <div className={`chat-bubble ${message.role}`}>
                       {message.image && (
@@ -1008,14 +1102,14 @@ export default function ChatPage() {
             })}
             {loading && (
               <div className="chat-row assistant">
-                <div className="chat-avatar">
+                <div className="chat-avatar coach-av">
                   <Sparkles size={14} />
                 </div>
                 <div className="chat-bubble-col">
-                  <div className="chat-bubble assistant typing">
-                    <span />
-                    <span />
-                    <span />
+                  <div className="chat-bubble assistant typing" aria-label="Coach is composing response">
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
                   </div>
                 </div>
               </div>
@@ -1099,19 +1193,28 @@ export default function ChatPage() {
             <form className="chat-input-row" onSubmit={send}>
               <button
                 type="button"
-                className={`mic-btn ${voice.active ? "on" : ""}`}
+                className={`mic-btn ${voice.active ? "on" : ""} active:scale-95 transition-transform duration-150`}
                 onClick={voice.active ? voice.stop : voice.start}
                 disabled={!voice.supported}
                 aria-label={micLabel}
                 aria-pressed={voice.active}
                 title={voice.supported ? micLabel : "Voice input works in Chrome, Edge or Safari"}
               >
-                {voice.active ? <Square size={16} /> : <Mic size={18} />}
+                {voice.active ? (
+                  <span className="acoustic-wave-bars" aria-hidden="true">
+                    <span className="acoustic-bar" />
+                    <span className="acoustic-bar" />
+                    <span className="acoustic-bar" />
+                    <span className="acoustic-bar" />
+                  </span>
+                ) : (
+                  <Mic size={18} />
+                )}
               </button>
               <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickPhoto} />
               <button
                 type="button"
-                className={`mic-btn photo-btn ${pendingImage ? "on" : ""}`}
+                className={`mic-btn photo-btn ${pendingImage ? "on" : ""} active:scale-95 transition-transform duration-150`}
                 onClick={() => fileRef.current?.click()}
                 disabled={loading}
                 aria-label="Upload or take a meal photo"
@@ -1121,7 +1224,7 @@ export default function ChatPage() {
               </button>
               <button
                 type="button"
-                className={`mic-btn loc-btn ${coords ? "on" : ""}`}
+                className={`mic-btn loc-btn ${coords ? "on" : ""} active:scale-95 transition-transform duration-150`}
                 onClick={toggleLocation}
                 aria-pressed={!!coords}
                 aria-label={coords ? "Location active. Tap to turn off" : "Share location for restaurant searches"}
@@ -1146,13 +1249,251 @@ export default function ChatPage() {
                 }
                 disabled={loading}
               />
-              <button className="primary-btn" disabled={loading || (!input.trim() && !pendingImage)}>
+              <button className="primary-btn active:scale-95 transition-transform duration-150" disabled={loading || (!input.trim() && !pendingImage)}>
                 <Send size={16} /> Send
               </button>
             </form>
           )}
         </div>
       </div>
+
+      <style>{`
+        /* Retro Ambient Nutrition Motifs */
+        .chat-main .chat-panel {
+          position: relative;
+        }
+        .chat-main .chat-ambient-motifs {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          overflow: hidden;
+          z-index: 0;
+        }
+        .chat-main .motif {
+          position: absolute;
+          opacity: 0.035; /* 3.5% opacity, strictly 2%-4% */
+          animation: gentle-drift 18s ease-in-out infinite;
+          pointer-events: none;
+        }
+        .chat-main .motif-wheat {
+          top: 6%;
+          right: 4%;
+          width: 95px;
+          height: 155px;
+          animation-duration: 18s;
+        }
+        .chat-main .motif-helix {
+          bottom: 12%;
+          left: 4%;
+          width: 105px;
+          height: 105px;
+          animation-duration: 22s;
+          animation-delay: -6s;
+        }
+        .chat-main .motif-pod {
+          top: 46%;
+          right: 7%;
+          width: 85px;
+          height: 85px;
+          animation-duration: 19s;
+          animation-delay: -10s;
+        }
+        .chat-main .motif-droplet {
+          bottom: 25%;
+          right: 38%;
+          width: 58px;
+          height: 78px;
+          animation-duration: 17s;
+          animation-delay: -3s;
+        }
+
+        @keyframes gentle-drift {
+          0%, 100% {
+            transform: translateY(0px) rotate(0deg);
+          }
+          50% {
+            transform: translateY(-6px) rotate(1deg);
+          }
+        }
+
+        /* Message Stream & Bubble Transitions */
+        .chat-main .chat-messages {
+          position: relative;
+          z-index: 1;
+        }
+        .chat-main .chat-row {
+          animation: retro-bubble-in 220ms ease-out both;
+          position: relative;
+          z-index: 1;
+        }
+
+        @keyframes retro-bubble-in {
+          from {
+            opacity: 0;
+            transform: translateY(8px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        /* User Message Avatar */
+        .chat-main .chat-row.user .chat-avatar.user-av {
+          background: transparent !important;
+          padding: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          overflow: hidden;
+          width: 30px;
+          height: 30px;
+        }
+        .chat-main .chat-row.user .chat-avatar.user-av .user-initial-fallback {
+          display: grid;
+          place-items: center;
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          background: linear-gradient(135deg, #d79c7f, #b86d62);
+          color: #fff;
+          font-size: 11px;
+          font-weight: 700;
+        }
+        .chat-main .chat-row.user .chat-avatar.user-av .user-av-img {
+          width: 100%;
+          height: 100%;
+          border-radius: 9999px;
+          object-fit: cover;
+          border: 1px solid rgba(35, 66, 54, 0.2);
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Coach Response Typing Wave & Botanical Sparkle Pulse */
+        .chat-main .chat-bubble.assistant.typing {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 10px 16px;
+          min-height: 38px;
+        }
+        .chat-main .chat-bubble.assistant.typing .typing-dot {
+          display: inline-block;
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #234236;
+          opacity: 0.5;
+          animation: retro-typing-wave 1.4s ease-in-out infinite, retro-sparkle-pulse 2.2s ease-in-out infinite;
+        }
+        .chat-main .chat-bubble.assistant.typing .typing-dot:nth-child(1) {
+          animation-delay: 0s, 0s;
+        }
+        .chat-main .chat-bubble.assistant.typing .typing-dot:nth-child(2) {
+          animation-delay: 0.2s, 0.3s;
+        }
+        .chat-main .chat-bubble.assistant.typing .typing-dot:nth-child(3) {
+          animation-delay: 0.4s, 0.6s;
+        }
+
+        @keyframes retro-typing-wave {
+          0%, 60%, 100% {
+            transform: translateY(0);
+          }
+          30% {
+            transform: translateY(-4px);
+          }
+        }
+
+        @keyframes retro-sparkle-pulse {
+          0%, 100% {
+            transform: scale(0.96);
+            opacity: 0.5;
+          }
+          50% {
+            transform: scale(1.0);
+            opacity: 1.0;
+          }
+        }
+
+        /* Active Mic State: Vintage Acoustic Rhythm Wave in #234236 */
+        .chat-main .mic-btn.on {
+          background: #234236 !important;
+          border-color: #234236 !important;
+          color: #f4f3ef !important;
+          box-shadow: 0 0 0 3px rgba(35, 66, 54, 0.15) !important;
+          animation: none !important;
+        }
+        .chat-main .acoustic-wave-bars {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 2.5px;
+          height: 18px;
+          width: 18px;
+        }
+        .chat-main .acoustic-bar {
+          display: block;
+          width: 2.5px;
+          height: 100%;
+          border-radius: 2px;
+          background: #f4f3ef;
+          transform: scaleY(0.3);
+          transform-origin: center;
+          animation: vintage-acoustic-pulse 1.1s ease-in-out infinite;
+        }
+        .chat-main .acoustic-bar:nth-child(1) { animation-delay: 0s; }
+        .chat-main .acoustic-bar:nth-child(2) { animation-delay: 0.18s; }
+        .chat-main .acoustic-bar:nth-child(3) { animation-delay: 0.36s; }
+        .chat-main .acoustic-bar:nth-child(4) { animation-delay: 0.54s; }
+
+        @keyframes vintage-acoustic-pulse {
+          0%, 100% {
+            transform: scaleY(0.3);
+          }
+          50% {
+            transform: scaleY(0.95);
+          }
+        }
+
+        /* Voice bar wave styling matching #234236 */
+        .chat-main .voice-bar .voice-wave i {
+          background: #234236 !important;
+        }
+        .chat-main .voice-bar.speaking .voice-wave i {
+          background: #234236 !important;
+        }
+        .chat-main .voice-bar.listening .voice-wave i {
+          background: #234236 !important;
+        }
+
+        /* Tactile Press Micro-Interactions */
+        .chat-main button,
+        .chat-main .primary-btn,
+        .chat-main .chat-day-chip,
+        .chat-main .area-chip,
+        .chat-main .mic-btn,
+        .chat-main .ghost-btn {
+          transition: transform 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+        }
+        .chat-main button:active:not(:disabled),
+        .chat-main .primary-btn:active:not(:disabled),
+        .chat-main .chat-day-chip:active,
+        .chat-main .area-chip:active,
+        .chat-main .mic-btn:active:not(:disabled) {
+          transform: scale(0.95);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .chat-main .motif,
+          .chat-main .chat-row,
+          .chat-main .chat-bubble.assistant.typing .typing-dot,
+          .chat-main .acoustic-bar {
+            animation: none !important;
+            transform: none !important;
+          }
+        }
+      `}</style>
     </Shell>
   );
 }
