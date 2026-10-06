@@ -22,10 +22,52 @@ import Shell from "./components/Shell";
 import { FoodOption, FoodOptionList } from "./components/FoodOptions";
 import { TodayPlate } from "./components/TodayPlate";
 import { HydrationJar } from "./components/HydrationJar";
-import { VitaminShelf } from "./components/VitaminShelf";
+import { VitaminShelf, MicronutrientItem } from "./components/VitaminShelf";
 import { FoodGlyph } from "./components/art/FoodGlyph";
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+
+function mapBackendMicrosToShelf(backendData: any): MicronutrientItem[] | null {
+  if (!backendData || !backendData.nutrients) return null;
+  const symbols: Record<string, string> = {
+    calcium_mg: "Ca",
+    magnesium_mg: "Mg",
+    sodium_mg: "Na",
+    potassium_mg: "K+",
+    iron_mg: "Fe",
+    copper_mg: "Cu",
+    zinc_mg: "Zn",
+    vita_ug: "A",
+    vitc_mg: "C",
+    vitd_ug: "D",
+    vite_mg: "E",
+    vitk_ug: "K",
+    folate_ug: "B₉",
+    vitb1_mg: "B₁",
+    vitb2_mg: "B₂",
+    vitb3_mg: "B₃",
+    vitb5_mg: "B₅",
+    vitb6_mg: "B₆",
+    vitb7_ug: "B₇",
+  };
+
+  return backendData.nutrients
+    .filter((n: any) => n.key !== "fibre_g")
+    .map((n: any) => ({
+      key: n.key,
+      name: n.name,
+      symbol: symbols[n.key] || n.name.slice(0, 2),
+      group: n.category === "vitamin" ? "vitamin" : "mineral",
+      amount: n.amount,
+      target: n.rda || 100,
+      unit: n.unit,
+      pct: n.pct_rda,
+      topFoods: (n.top_foods || []).map((f: any) => ({
+        food_name: f.food_name,
+        amount: `${f.amount} ${n.unit}`,
+      })),
+    }));
+}
 
 type Profile = {
   status?: string;
@@ -212,6 +254,7 @@ export default function Page() {
   const [budget, setBudget] = useState<Budget | null>(null);
   const [meals, setMeals] = useState<Meal[]>([]);
   const [fitness, setFitness] = useState<FitnessSummary | null>(null);
+  const [microsData, setMicrosData] = useState<any>(null);
   const [chat, setChat] = useState("");
   const [reply, setReply] = useState("");
   const [loading, setLoading] = useState(false);
@@ -219,11 +262,12 @@ export default function Page() {
   const [notice, setNotice] = useState("");
 
   async function refresh() {
-    const [profileResponse, overviewResponse, mealsResponse, fitnessResponse] = await Promise.all([
+    const [profileResponse, overviewResponse, mealsResponse, fitnessResponse, microsResponse] = await Promise.all([
       fetch(`${API}/api/profile`),
       fetch(`${API}/api/overview`),
       fetch(`${API}/api/recent-meals`),
       fetch(`${API}/api/fitness/today`).catch(() => null),
+      fetch(`${API}/api/micronutrients/today`).catch(() => null),
     ]);
     const nextProfile = await profileResponse.json();
     const nextBudget = await overviewResponse.json();
@@ -232,6 +276,14 @@ export default function Page() {
       try {
         const nextFitness = await fitnessResponse.json();
         setFitness(nextFitness);
+      } catch {
+        // ignore parse error
+      }
+    }
+    if (microsResponse && microsResponse.ok) {
+      try {
+        const nextMicros = await microsResponse.json();
+        setMicrosData(nextMicros);
       } catch {
         // ignore parse error
       }
@@ -352,8 +404,8 @@ export default function Page() {
           carbsTarget={budget?.target_carbs_g || 0}
           fat={fat}
           fatTarget={budget?.target_fat_g || 0}
-          fibre={0}
-          fibreTarget={30}
+          fibre={microsData?.totals?.fibre_g || 0}
+          fibreTarget={microsData?.rdas?.fibre_g || 30}
           meals={meals}
           greeting={greeting}
           userName={name}
@@ -419,7 +471,10 @@ export default function Page() {
         </div>
 
         {/* Micronutrient Vitamin & Mineral Shelf */}
-        <VitaminShelf />
+        <VitaminShelf
+          items={mapBackendMicrosToShelf(microsData)}
+          status={microsData ? (microsData.has_data ? "ok" : "not_available") : "loading"}
+        />
 
         {/* Activity & Physical Movement from Google Fit */}
         <div className="section-header" style={{ marginTop: "36px" }}>
