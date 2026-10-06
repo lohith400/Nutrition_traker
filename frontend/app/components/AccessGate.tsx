@@ -43,20 +43,27 @@ export default function AccessGate({ children }: { children: ReactNode }) {
     <>
       {children}
       {needKey && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(246,243,238,0.97)", display: "grid", placeItems: "center", padding: 24 }}>
-          <form onSubmit={submit} style={{ width: "100%", maxWidth: 360, display: "grid", gap: 12 }}>
-            <h2 style={{ margin: 0, fontFamily: "inherit" }}>Enter your access key</h2>
-            <p style={{ margin: 0, opacity: 0.7 }}>This is the ACCESS_KEY you set on the server. It is saved on this device only.</p>
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(244,240,232,0.96)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", padding: 24 }}>
+          <form onSubmit={submit} style={{ width: "100%", maxWidth: 390, background: "#ffffff", border: "1px solid var(--border-rule, #e4ded2)", borderRadius: 16, padding: "28px 26px", display: "grid", gap: 14, boxShadow: "0 18px 45px rgba(28,27,24,0.12)" }}>
+            <span className="almanac-eyebrow" style={{ fontSize: "10px", letterSpacing: "1.2px", color: "var(--muted, #6d685c)", textTransform: "uppercase", fontWeight: 700 }}>
+              SECURITY ARCHIVE · VAULT GATE
+            </span>
+            <h2 className="almanac-serif" style={{ margin: 0, fontSize: "24px", color: "var(--ink, #1c1b18)" }}>
+              Enter your access key
+            </h2>
+            <p style={{ margin: 0, fontSize: "12.5px", color: "var(--ink-light, #5c574c)", lineHeight: 1.55 }}>
+              This is the secret access key configured for your NutriSync backend. It is stored securely on this local device only.
+            </p>
             <input
               type="password"
               autoFocus
               value={value}
               onChange={(e) => setValue(e.target.value)}
-              placeholder="Access key"
-              style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid #cfc8bb", fontSize: 16 }}
+              placeholder="Enter server access key…"
+              style={{ padding: "12px 14px", borderRadius: 10, border: "1px solid #d5cebf", fontSize: 15, background: "#faf8f2", outline: "none", color: "var(--ink, #1c1b18)" }}
             />
-            <button type="submit" style={{ padding: "12px 14px", borderRadius: 12, border: 0, background: "#2f4d42", color: "#fff", fontSize: 16, cursor: "pointer" }}>
-              Unlock
+            <button type="submit" className="primary-btn" style={{ padding: "12px 14px", borderRadius: 10, border: 0, background: "var(--sage-dark, #2f4d42)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", width: "100%" }}>
+              Unlock Pantry Archive ✦
             </button>
           </form>
         </div>

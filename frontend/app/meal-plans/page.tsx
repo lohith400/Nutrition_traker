@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ArrowUpRight, CheckCircle2, Plus, RefreshCw, Sparkles } from "lucide-react";
 import Shell, { API } from "../components/Shell";
+import { FoodGlyph } from "../components/art/FoodGlyph";
 
 type Option = { food_name: string; calories: number; protein_g: number; quantity: number; unit: "serving" | "grams"; serving_label?: string | null };
 type Slot = "breakfast" | "lunch" | "snack" | "dinner";
@@ -83,8 +84,13 @@ export default function MealPlansPage() {
       <div className="page-wrap">
         <div className="hero-row">
           <div>
-            <h1>Today&apos;s meal plan <span>✦</span></h1>
-            <p className="subtitle">Ideas for the rest of your day, chosen from the foods in your database to fit what you have left to eat.</p>
+            <div className="almanac-eyebrow">
+              <span>CULINARY DISPATCH</span>
+              <span className="dot-sep">·</span>
+              <span>DAILY ITINERARY</span>
+            </div>
+            <h1 className="almanac-serif">Today&apos;s Meal Plan <span>✦</span></h1>
+            <p className="subtitle">Suggested dishes for the remaining day, chosen from the foods in your database to fit your macro targets.</p>
           </div>
           <button className="primary-btn" onClick={load} disabled={loading}><RefreshCw size={16} /> {loading ? "Refreshing" : "Refresh plan"}</button>
         </div>
@@ -143,9 +149,12 @@ export default function MealPlansPage() {
                     const done = logged.has(id);
                     return (
                       <div className="meal-row" key={id}>
-                        <div className="meal-info"><b>{option.food_name}</b><span>{portion(option)}</span></div>
-                        <div className="macro-box"><b>{Math.round(option.calories)}</b><span>kcal</span></div>
-                        <div className="macro-box protein-box"><b>{option.protein_g}g</b><span>protein</span></div>
+                        <div className="meal-icon mint" style={{ marginRight: "4px" }}>
+                          <FoodGlyph name={option.food_name} mealType={slot.key} size={24} />
+                        </div>
+                        <div className="meal-info"><b>{option.food_name}</b><span className="almanac-mono">{portion(option)}</span></div>
+                        <div className="macro-box"><b className="tabular almanac-mono">{Math.round(option.calories)}</b><span>kcal</span></div>
+                        <div className="macro-box protein-box"><b className="tabular almanac-mono">{option.protein_g}g</b><span>protein</span></div>
                         <button className={done ? "log-chip done" : "log-chip"} onClick={() => logOption(slot.key, option)} disabled={done || logging === id} aria-label={`Log ${option.food_name} as ${slot.key}`}>
                           {done ? <CheckCircle2 size={14} /> : <Plus size={14} />}{done ? "Logged" : logging === id ? "Logging" : "Log"}
                         </button>

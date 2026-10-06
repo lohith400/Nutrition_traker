@@ -211,7 +211,12 @@ export default function ProfilePage() {
               onChange={handlePhotoSelected}
             />
             <div>
-              <h1>{!loaded ? "Your profile" : isNew ? "Create your profile" : name}</h1>
+              <div className="almanac-eyebrow">
+                <span>IDENTITY &amp; METABOLISM</span>
+                <span className="dot-sep">·</span>
+                <span>BIOMETRIC PROFILE</span>
+              </div>
+              <h1 className="almanac-serif">{!loaded ? "Your profile" : isNew ? "Create your profile" : name}</h1>
               <p className="subtitle">
                 {!loaded ? "Loading your details…" : isNew
                   ? "Tell us a little about you and we'll calculate your daily targets."

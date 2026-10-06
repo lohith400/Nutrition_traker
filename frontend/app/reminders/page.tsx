@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { AlarmClock, BellRing, Droplets, Send, Utensils } from "lucide-react";
 import Shell, { API } from "../components/Shell";
+import { FoodGlyph } from "../components/art/FoodGlyph";
 
 type Reminder = {
   id: number; kind: "food" | "water"; remind_time: string; repeat: "daily" | "once"; once_date: string | null;
@@ -119,9 +120,13 @@ export default function RemindersPage() {
       <div className="page-wrap">
         <div className="hero-row">
           <div>
-            <p className="eyebrow">STAY ON TRACK</p>
-            <h1>Reminders <span>✦</span></h1>
-            <p className="subtitle">Set a time, a food or some water. NutriSync pings you then and logs it for you. You can also just tell the Coach: “remind me at 4 pm to drink water”.</p>
+            <div className="almanac-eyebrow">
+              <span>SCHEDULED SIGNALS</span>
+              <span className="dot-sep">·</span>
+              <span>TIMEKEEPING</span>
+            </div>
+            <h1 className="almanac-serif">Reminders <span>✦</span></h1>
+            <p className="subtitle">Set a time, a food or hydration goal. NutriSync pings you then and auto-logs your routine.</p>
           </div>
         </div>
 
@@ -208,7 +213,10 @@ export default function RemindersPage() {
             <div className="meal-list">
               {items.map(r => (
                 <div className={`rem-item ${r.enabled ? "" : "off"}`} key={r.id}>
-                  <div className="rem-time">{to12h(r.remind_time)}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <FoodGlyph name={r.kind === "water" ? "jar" : (r.food_name || "plate")} size={24} />
+                    <div className="rem-time tabular almanac-mono">{to12h(r.remind_time)}</div>
+                  </div>
                   <div className="meal-info">
                     <b>{describe(r)}</b>
                     <span>

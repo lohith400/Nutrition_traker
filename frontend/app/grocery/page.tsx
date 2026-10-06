@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Flame, MessageCircle, Plus, ShoppingCart, Sparkles, Target, Trash2 } from "lucide-react";
 import Shell, { API } from "../components/Shell";
+import { FoodGlyph } from "../components/art/FoodGlyph";
 
 type Item = { id: number; name: string; quantity: number; unit: string };
 type Nutri = { calories: number; protein_g: number; carbs_g: number; fat_g: number };
@@ -101,7 +102,12 @@ export default function GroceryPage() {
       <div className="page-wrap">
         <div className="hero-row">
           <div>
-            <h1>Your grocery <span>✦</span></h1>
+            <div className="almanac-eyebrow">
+              <span>PANTRY INVENTORY</span>
+              <span className="dot-sep">·</span>
+              <span>KITCHEN STAPLES</span>
+            </div>
+            <h1 className="almanac-serif">Grocery &amp; Pantry <span>✦</span></h1>
             <p className="subtitle">Keep track of the ingredients you have at home. When you ask the coach to suggest a meal from your grocery list, it cooks only from what&apos;s here.</p>
           </div>
           <Link className="primary-btn" href="/chat"><MessageCircle size={16} /> Ask the coach</Link>
@@ -128,9 +134,12 @@ export default function GroceryPage() {
         </form>
 
         <div className="staple-chips" aria-label="Quick add common items">
-          <small>Quick add:</small>
+          <small className="almanac-eyebrow">Quick add:</small>
           {STAPLES.map(([n, q, u]) => (
-            <button key={n} type="button" className="chip" onClick={() => { setName(n); setQuantity(String(q)); setUnit(units.includes(u) ? u : units[0]); document.querySelector<HTMLInputElement>(".grocery-add input")?.focus(); }}>{n}</button>
+            <button key={n} type="button" className="chip" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }} onClick={() => { setName(n); setQuantity(String(q)); setUnit(units.includes(u) ? u : units[0]); document.querySelector<HTMLInputElement>(".grocery-add input")?.focus(); }}>
+              <FoodGlyph name={n} size={15} />
+              <span>{n}</span>
+            </button>
           ))}
         </div>
 
