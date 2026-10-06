@@ -408,21 +408,6 @@ def ensure_schema(db_path=None) -> None:
     if needs_grading:
         refresh_food_quality(conn)
 
-    # Check if micronutrients need loading in existing food_items (e.g. if calcium_mg_100g is all NULL)
-    needs_micros = False
-    try:
-        sample = conn.execute("SELECT COUNT(*) FROM food_items WHERE calcium_mg_100g IS NOT NULL").fetchone()
-        if sample and sample[0] == 0:
-            count = conn.execute("SELECT COUNT(*) FROM food_items").fetchone()[0]
-            if count > 0:
-                needs_micros = True
-    except Exception:
-        pass
-
-    if needs_micros:
-        load_foods(conn)
-        refresh_food_quality(conn)
-
     conn.row_factory = None
     has_prefs = conn.execute("SELECT COUNT(*) FROM food_preferences").fetchone()[0]
     has_logs = conn.execute("SELECT COUNT(*) FROM daily_logs").fetchone()[0]
