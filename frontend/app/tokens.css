@@ -1,0 +1,247 @@
+/* ==========================================================================
+   NUTRISYNC DESIGN TOKENS: THE PANTRY ALMANAC
+   Craft-made, printed editorial material system for nutrition tracking.
+   ========================================================================== */
+
+:root {
+  /* Paper & Ground */
+  --paper-bg: #fcfaf5;
+  --paper-surface: #ffffff;
+  --paper-card: rgba(255, 255, 255, 0.94);
+  --paper-card-subtle: rgba(252, 250, 245, 0.82);
+  --paper-dim: #f3eee4;
+  --paper-dimmer: #e9e2d3;
+  --paper-rule: #e5dfd3;
+  --paper-rule-strong: #cfc7b8;
+  --paper-rule-double: #b8b09f;
+
+  /* Ink Spectrum */
+  --ink: #1c1b18;
+  --ink-muted: #545147;
+  --ink-soft: #7f7b70;
+  --ink-faint: #b4aea1;
+  --ink-subtle: #dbd6cb;
+
+  /* Botanical Sages & Forest */
+  --sage-dark: #22382e;
+  --sage-forest: #2b4639;
+  --sage-leaf: #3e5d4e;
+  --sage-mid: #527563;
+  --sage-tint: #ebf2ed;
+  --sage-soft: #d5e4d9;
+
+  /* Ingredient Inks & Accents */
+  --terracotta: #b84e37;
+  --coral: #d96b52;
+  --tomato: #c84b31;
+  --mustard: #d49b35;
+  --wheat: #ecd9b3;
+  --olive: #606c38;
+  --olive-tint: #eef2e1;
+  --teal: #33716a;
+  --teal-tint: #e4f0ee;
+  --plum: #6e445b;
+  --plum-tint: #f3ebf0;
+  --amber: #cb7c28;
+
+  /* Nutrition & Macro Semantics */
+  --macro-calories: var(--terracotta);
+  --macro-protein: var(--sage-leaf);
+  --macro-carbs: var(--mustard);
+  --macro-fat: #c27838;
+  --macro-fibre: var(--olive);
+  --macro-water: #2c6e80;
+
+  /* Backward Compatibility Mappings */
+  --bg: var(--paper-bg);
+  --panel: var(--paper-surface);
+  --line: var(--paper-rule);
+  --muted: var(--ink-muted);
+  --soft: var(--ink-soft);
+  --green: var(--sage-leaf);
+  --green-dark: var(--sage-forest);
+  --blue: #4d7a8c;
+  --yellow: var(--mustard);
+  --cyan: var(--teal);
+
+  /* Elevation & Shadows */
+  --shadow-sm: 0 2px 5px rgba(28, 27, 24, 0.03), 0 1px 2px rgba(28, 27, 24, 0.02);
+  --shadow-md: 0 8px 20px rgba(28, 27, 24, 0.05), 0 2px 6px rgba(28, 27, 24, 0.03);
+  --shadow-lg: 0 18px 40px rgba(28, 27, 24, 0.07), 0 4px 12px rgba(28, 27, 24, 0.04);
+  --shadow-pressed: inset 0 2px 4px rgba(28, 27, 24, 0.05);
+  --shadow: var(--shadow-md);
+
+  /* Geometry */
+  --radius-xs: 6px;
+  --radius-sm: 9px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 26px;
+  --radius-pill: 9999px;
+
+  /* Typography Defaults */
+  --font-serif: var(--font-fraunces, 'Fraunces', 'Playfair Display', Georgia, serif);
+  --font-sans: var(--font-dm-sans, 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  --font-mono: var(--font-dm-mono, 'DM Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, monospace);
+
+  /* Animation Easing */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --transition-quick: 0.14s ease;
+  --transition-smooth: 0.26s var(--ease-out-expo);
+  --transition-slow: 0.45s var(--ease-out-expo);
+}
+
+/* --------------------------------------------------------------------------
+   Paper Grain & Base Surface
+   -------------------------------------------------------------------------- */
+body {
+  background-color: var(--paper-bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  position: relative;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Subtle organic paper grain overlay (<2.5% opacity, pointer-events none) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 99999;
+  opacity: 0.024;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+/* Tabular numbers for clean numeric layout */
+.tabular,
+.stat-number,
+.mbar-top b,
+.ring-center b,
+.hx-res,
+.food-option-row b,
+.nutrition-facts dd,
+.pantry-stat b {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* --------------------------------------------------------------------------
+   Editorial Utilities & Print Cues
+   -------------------------------------------------------------------------- */
+.almanac-serif {
+  font-family: var(--font-serif);
+  letter-spacing: -0.035em;
+}
+
+.almanac-mono {
+  font-family: var(--font-mono);
+  letter-spacing: -0.015em;
+}
+
+.eyebrow,
+.almanac-eyebrow {
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+}
+
+/* Classic double-rule print border */
+.rule-double {
+  border-top: 3px double var(--paper-rule-double);
+}
+
+.rule-single {
+  border-top: 1px solid var(--paper-rule);
+}
+
+/* Letterpress stamp badge */
+.stamp-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px dashed var(--paper-rule-strong);
+  background: var(--paper-dim);
+  color: var(--ink-muted);
+}
+
+.stamp-tag.forest {
+  border-color: var(--sage-leaf);
+  background: var(--sage-tint);
+  color: var(--sage-dark);
+}
+
+.stamp-tag.terracotta {
+  border-color: var(--terracotta);
+  background: #fdf3f0;
+  color: var(--terracotta);
+}
+
+.stamp-tag.mustard {
+  border-color: var(--mustard);
+  background: #fdf8ed;
+  color: #8c6314;
+}
+
+.stamp-tag.teal {
+  border-color: var(--teal);
+  background: var(--teal-tint);
+  color: var(--teal);
+}
+
+/* Receipt ticket serrated edge */
+.receipt-card {
+  position: relative;
+  background: #fff;
+  border: 1px solid var(--paper-rule);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.receipt-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--paper-rule-strong) 0,
+    var(--paper-rule-strong) 6px,
+    transparent 6px,
+    transparent 10px
+  );
+  opacity: 0.7;
+}
+
+/* Focus ring for WCAG accessibility */
+:focus-visible {
+  outline: 2px solid var(--sage-leaf);
+  outline-offset: 2px;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
