@@ -149,4 +149,208 @@
 .panel,.stat-card{transition:box-shadow .25s,transform .25s}.glance:hover,.cf-card:hover{transform:translateY(-2px)}
 @media(max-width:1020px){.cf-layout{grid-template-columns:1fr}.cf-side{position:static}.glance{flex-direction:column;align-items:stretch}.ring-wrap{margin:0 auto}}
 @media(max-width:720px){.wt-stats{grid-template-columns:repeat(2,1fr)}.cf-meta{grid-template-columns:1fr 1fr}.cf-meta label:first-child{grid-column:1/-1}.fo-both{grid-template-columns:1fr}.cf-head-row,.cf-ing-row{grid-template-columns:1fr 66px 84px 28px}.entry-edit{padding-left:0}.fo-head{flex-wrap:wrap}.cf-bar{grid-template-columns:70px 1fr 34px}}
-@media(prefers-reduced-motion:reduce){.fo-body,.cf-ing,.week-bar,.donut circle,.cf-bar i,.split-bar i{animation:none!important;transition:none!important}}
+@media(prefers-reduced-motion:reduce){.fo-body,.cf-ing,.week-bar,.donut circle,.cf-bar i,.split-bar i,.plate-arc,.jar-wave-front,.jar-wave-back,.shelf-liquid{animation:none!important;transition:none!important}}
+
+/* ===== PANTRY ALMANAC SIGNATURE STYLES ===== */
+
+/* Typography & Badges */
+.almanac-serif{font-family:var(--font-serif);letter-spacing:-0.03em}
+.almanac-mono{font-family:var(--font-mono);letter-spacing:-0.02em}
+.tabular{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+.almanac-eyebrow{font-size:10.5px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:6px}
+.almanac-eyebrow .dot-sep{color:var(--border-rule);font-weight:400}
+
+.stamp-tag{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;letter-spacing:0.5px;padding:3px 9px;border-radius:4px;border:1px dashed var(--border-rule);text-transform:uppercase;background:var(--paper-tag);color:var(--ink)}
+.stamp-tag.sage{background:#eef4ee;border-color:var(--sage-border);color:var(--sage-leaf)}
+.stamp-tag.teal{background:#e7f2f5;border-color:#b4d6df;color:var(--teal)}
+.stamp-tag.tomato{background:#fdf0ed;border-color:#f5c6b9;color:var(--tomato)}
+.stamp-tag.mustard{background:#fdf7e7;border-color:#ecd9a5;color:var(--mustard)}
+.stamp-tag.forest{background:#edf2ed;border-color:#bfd3bf;color:var(--sage-moss)}
+
+/* Food Glyphs */
+.food-glyph-svg{display:inline-block;vertical-align:middle;flex-shrink:0;transition:transform 0.15s ease}
+.food-glyph-svg:hover{transform:scale(1.08)}
+
+/* Today's Plate Hero */
+.today-plate-hero{margin:28px 0 32px;padding:28px 32px;background:var(--paper-card);border:1px solid var(--border-rule);border-radius:18px;box-shadow:var(--shadow-card);position:relative;overflow:hidden}
+.today-plate-hero::before{content:"";position:absolute;inset:0;background-image:var(--paper-grain);opacity:0.35;pointer-events:none}
+.plate-hero-intro{margin-bottom:24px}
+.plate-hero-intro h1{margin:6px 0 8px;font-size:clamp(1.9rem,3vw,2.8rem);line-height:1.15;color:var(--ink)}
+.plate-hero-intro h1 em{font-style:italic;color:var(--tomato);font-weight:400}
+.plate-sub{margin:0;font-size:13.5px;line-height:1.6;color:var(--ink-light);max-width:720px}
+
+.plate-stage{display:grid;grid-template-columns:320px 1fr;gap:36px;align-items:center;position:relative;z-index:1}
+.plate-ceramic-wrap{position:relative;width:290px;height:290px;margin:0 auto;display:grid;place-items:center}
+.plate-ceramic-svg{width:100%;height:100%;filter:drop-shadow(0 14px 28px rgba(44,38,28,0.12))}
+.plate-arc{transition:stroke-dasharray 0.85s cubic-bezier(0.16,1,0.3,1)}
+
+.plate-center-hub{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;pointer-events:none}
+.plate-center-label{font-size:9.5px;letter-spacing:1.2px;color:var(--muted);margin-bottom:2px}
+.plate-center-cal{font-size:42px;font-weight:700;line-height:0.95;color:var(--ink)}
+.plate-center-unit{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-top:2px}
+.plate-burned-pill{margin-top:8px;display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:99px;background:#fcf1ec;border:1px solid #f3d1c4;color:var(--tomato);font-size:10.5px;font-weight:600}
+
+.plate-food-stamps{position:absolute;inset:0;pointer-events:none}
+.plate-stamp-chip{position:absolute;background:#fff;border:1px solid var(--border-rule);border-radius:50%;width:34px;height:34px;display:grid;place-items:center;box-shadow:0 3px 8px rgba(0,0,0,0.08);animation:plateDrop 0.45s cubic-bezier(0.18,0.89,0.32,1.28) backwards}
+.plate-stamp-chip:nth-child(1){top:18px;left:75px}
+.plate-stamp-chip:nth-child(2){top:45px;right:25px}
+.plate-stamp-chip:nth-child(3){bottom:30px;right:45px}
+.plate-stamp-chip:nth-child(4){bottom:28px;left:45px}
+.plate-stamp-chip:nth-child(5){top:110px;left:10px}
+
+@keyframes plateDrop{from{opacity:0;transform:scale(0.4) translateY(-14px)}to{opacity:1;transform:scale(1) translateY(0)}}
+
+.plate-quadrant-legend{display:grid;gap:14px;padding-left:12px}
+.quadrant-item{display:flex;flex-direction:column;gap:5px}
+.quad-head{display:flex;align-items:center;gap:8px;font-size:13px}
+.quad-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.quad-protein .quad-dot{background:var(--sage-leaf)}
+.quad-carbs .quad-dot{background:var(--mustard)}
+.quad-fat .quad-dot{background:var(--terracotta)}
+.quad-fibre .quad-dot{background:var(--olive)}
+.quad-head b{color:var(--ink);font-weight:600;flex:1}
+.quad-val{color:var(--muted);font-size:12px;font-family:var(--font-mono)}
+.plate-action-btn{margin-top:10px;width:fit-content}
+
+@media(max-width:920px){
+  .plate-stage{grid-template-columns:1fr;gap:26px}
+  .plate-quadrant-legend{padding-left:0}
+  .plate-action-btn{width:100%}
+}
+
+/* Hydration Jar */
+.hydration-jar-card{padding:24px 28px;background:var(--paper-card);border:1px solid var(--border-rule);border-radius:16px;box-shadow:var(--shadow-card);position:relative}
+.jar-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px}
+.jar-card-head h3{margin:4px 0 0;font-size:19px;color:var(--ink)}
+
+.jar-stage{display:grid;grid-template-columns:150px 1fr;gap:24px;align-items:center}
+.jar-glass-wrap{position:relative;width:130px;height:185px;margin:0 auto;display:grid;place-items:center}
+.jar-glass-svg{width:100%;height:100%;filter:drop-shadow(0 8px 18px rgba(30,93,112,0.12))}
+.jar-wave-front{animation:jarWave 4s ease-in-out infinite alternate}
+.jar-wave-back{animation:jarWaveBack 5s ease-in-out infinite alternate}
+@keyframes jarWave{0%{transform:translateX(-6px)}100%{transform:translateX(6px)}}
+@keyframes jarWaveBack{0%{transform:translateX(5px)}100%{transform:translateX(-5px)}}
+
+.jar-bubble{animation:jarBubble 3s infinite ease-in}
+.jar-bubble.b2{animation-delay:1s}
+.jar-bubble.b3{animation-delay:2s}
+@keyframes jarBubble{0%{transform:translateY(0);opacity:0}50%{opacity:0.7}100%{transform:translateY(-30px);opacity:0}}
+
+.jar-glass-wrap.ripple-active{animation:jarRipple 0.8s ease}
+@keyframes jarRipple{0%{transform:scale(1)}30%{transform:scale(1.05)}60%{transform:scale(0.98)}100%{transform:scale(1)}}
+
+.jar-numeric-readout{position:absolute;bottom:22px;display:flex;flex-direction:column;align-items:center;pointer-events:none}
+.jar-current-liters{font-size:24px;font-weight:700;color:#ffffff;text-shadow:0 1px 4px rgba(0,0,0,0.4)}
+.jar-liters-unit{font-size:10px;color:#e7f2f5;text-shadow:0 1px 3px rgba(0,0,0,0.4)}
+
+.jar-controls{display:flex;flex-direction:column;gap:12px}
+.jar-hint{margin:0;font-size:12.5px;color:var(--muted);line-height:1.5}
+.water-quick-buttons{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.water-pip-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:10px 4px;border:1px solid var(--border-rule);background:#faf8f3;border-radius:10px;color:var(--teal);font-weight:600;font-size:12px;transition:all 0.15s ease}
+.water-pip-btn:hover:not(:disabled){background:#eef6f8;border-color:#b4d6df;transform:translateY(-1px)}
+.water-pip-btn:disabled{opacity:0.5;cursor:not-allowed}
+.water-pip-btn small{font-size:9.5px;color:var(--muted);font-weight:400}
+
+@media(max-width:640px){
+  .jar-stage{grid-template-columns:1fr;gap:16px}
+  .water-quick-buttons{grid-template-columns:repeat(2,1fr)}
+}
+
+/* Vitamin & Mineral Shelf */
+.vitamin-shelf-card{padding:26px 28px;background:var(--paper-card);border:1px solid var(--border-rule);border-radius:16px;box-shadow:var(--shadow-card);margin-top:24px}
+.shelf-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}
+.shelf-header h3{margin:4px 0 0;font-size:20px;color:var(--ink)}
+.shelf-legend{display:flex;gap:14px;font-size:11px;color:var(--muted)}
+.legend-pip{display:flex;align-items:center;gap:5px}
+.legend-pip i{width:8px;height:8px;border-radius:2px;display:inline-block}
+.legend-pip.vit i{background:var(--plum)}
+.legend-pip.min i{background:var(--teal)}
+
+.shelf-calm-notice{display:flex;align-items:center;gap:8px;padding:9px 13px;border-radius:8px;background:#f9f6ef;border:1px dashed var(--border-rule);color:var(--ink-light);font-size:11.5px;margin-bottom:16px}
+.shelf-rack-stage{position:relative;margin:10px 0 14px}
+.shelf-jars-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(56px,1fr));gap:10px 8px;align-items:end;position:relative;z-index:2;padding-bottom:6px}
+
+.shelf-jar-col{display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;cursor:pointer;padding:6px 2px;border-radius:8px;transition:transform 0.15s ease,background 0.15s ease}
+.shelf-jar-col:hover{background:rgba(235,231,220,0.5);transform:translateY(-2px)}
+.shelf-jar-col.selected{background:rgba(215,228,218,0.5);box-shadow:0 0 0 2px var(--sage-leaf)}
+.shelf-jar-col.unknown{opacity:0.65}
+.shelf-jar-svg-wrap{width:40px;height:58px;display:grid;place-items:center}
+.shelf-jar-svg{width:100%;height:100%}
+.shelf-liquid{transition:height 0.6s ease}
+
+.jar-title{font-size:10px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:54px}
+.jar-status-sub{font-size:9.5px;color:var(--muted)}
+
+.shelf-wood-ledge{height:8px;background:linear-gradient(180deg,#cbb38d,#a5885c);border-radius:3px;box-shadow:0 4px 10px rgba(0,0,0,0.1);margin-top:2px}
+
+.shelf-detail-card{margin-top:14px;padding:14px 18px;background:#fbf9f4;border:1px solid var(--border-rule);border-radius:10px;animation:fo-in 0.2s ease}
+.shelf-detail-content{display:flex;flex-direction:column;gap:10px}
+.detail-top{display:flex;justify-content:space-between;align-items:flex-start}
+.detail-top b{font-size:15px;color:var(--ink);display:block}
+.detail-top small{font-size:11px;color:var(--muted)}
+.detail-close{font-size:20px;color:var(--muted);cursor:pointer;padding:0 4px;line-height:1}
+.detail-foods{display:flex;flex-direction:column;gap:6px}
+.detail-chips{display:flex;gap:6px;flex-wrap:wrap}
+
+/* Classic Nutrition Facts Label (FDA/ICMR Editorial Stamp) */
+.nutrition-facts-card{background:#ffffff;border:2px solid #1c1b18;padding:14px 16px;border-radius:2px;color:#1c1b18;font-family:var(--font-sans);max-width:320px;box-shadow:3px 3px 0 rgba(28,27,24,0.15)}
+.nutrition-facts-card.compact{padding:10px 12px;max-width:270px}
+.nf-header{margin-bottom:4px}
+.nf-title{margin:0;font-family:var(--font-serif);font-size:26px;font-weight:900;line-height:1;letter-spacing:-0.04em}
+.nf-sub{margin:3px 0 0;font-size:10.5px;color:var(--muted)}
+.nf-divider-thick{height:8px;background:#1c1b18;margin:5px 0}
+.nf-divider-med{height:4px;background:#1c1b18;margin:5px 0}
+.nf-divider-thin{height:1px;background:#1c1b18;margin:4px 0}
+.nf-calories-row{display:flex;justify-content:space-between;align-items:flex-end;padding:3px 0}
+.nf-label{display:block;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
+.nf-cal-title{font-size:16px;font-weight:900}
+.nf-cal-val{font-size:32px;font-weight:900;font-family:var(--font-mono);line-height:0.9}
+.nf-dv-header{text-align:right;font-size:10px;font-weight:700;padding:2px 0}
+.nf-line{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;padding:3px 0}
+.nf-line b{font-weight:700}
+.nf-line.nf-indent{padding-left:14px;font-size:10.5px}
+.nf-dv{font-family:var(--font-mono);font-size:11.5px}
+.nf-footnote{font-size:9px;color:var(--muted);line-height:1.35;margin:6px 0 0}
+
+/* Contents Page Sidebar Polish & Phone Navigation */
+.contents-header{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);padding:0 12px 6px;border-bottom:1px solid var(--border-rule);margin-bottom:8px;display:flex;justify-content:space-between}
+.chapter-num{font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-right:8px;opacity:0.75}
+
+.mobile-bottom-tabs{display:none}
+@media(max-width:720px){
+  .mobile-bottom-tabs{display:flex;position:fixed;bottom:0;left:0;right:0;height:62px;background:rgba(252,250,245,0.96);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-top:1px solid var(--border-rule);z-index:900;justify-content:space-around;align-items:center;padding:0 8px}
+  .mobile-bottom-tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--muted);font-size:10px;font-weight:600;text-decoration:none;padding:6px 10px;border-radius:8px;transition:color 0.15s ease}
+  .mobile-bottom-tab.active{color:var(--sage-leaf);font-weight:700}
+  .mobile-bottom-tab svg{flex-shrink:0}
+  .page-wrap{padding-bottom:84px!important}
+}
+
+/* Chat Almanac Slips & Photo Scanner */
+.chat-photo-wrap{position:relative;display:inline-block;border-radius:12px;overflow:hidden;margin-bottom:8px;border:1px solid var(--border-rule);max-width:280px}
+.chat-photo-wrap img{display:block;width:100%;height:auto;object-fit:cover}
+.chat-photo-wrap.analyzing::after{content:"";position:absolute;left:0;right:0;height:3px;background:linear-gradient(90deg,transparent,var(--sage-leaf),#85b399,transparent);box-shadow:0 0 10px var(--sage-leaf);animation:photoScan 1.8s ease-in-out infinite;pointer-events:none}
+@keyframes photoScan{0%{top:0%}50%{top:100%}100%{top:0%}}
+
+.need-location-card{display:flex;flex-direction:column;gap:10px;background:#fffdf9;border:1px solid #ebd9b8;border-radius:12px;padding:14px 16px}
+.need-loc-head{display:flex;align-items:center;gap:8px;color:#8c6d1f;font-weight:600;font-size:13px}
+.need-loc-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px}
+.area-chip{padding:5px 10px;background:#f5efe2;border:1px solid #e2d2b5;border-radius:6px;font-size:11px;font-weight:600;color:var(--ink);cursor:pointer;transition:all 0.15s}
+.area-chip:hover{background:#ecdcb8;transform:translateY(-1px)}
+.area-manual-input{display:flex;gap:6px;width:100%;margin-top:6px}
+.area-manual-input input{flex:1;padding:7px 10px;border:1px solid var(--border-rule);border-radius:8px;font-size:12px;background:#fff}
+
+.resto-stack{display:grid;gap:10px;margin-top:8px}
+.resto-card{background:#ffffff;border:1px solid var(--border-rule);border-radius:10px;padding:12px 14px;box-shadow:0 2px 6px rgba(0,0,0,0.03)}
+.resto-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.resto-head b{font-size:14px;color:var(--ink)}
+.resto-tag{font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:4px;background:#eef4ee;color:var(--sage-leaf);border:1px solid var(--sage-border)}
+.resto-tag.veg{background:#e3f2e3;color:#226322;border-color:#b9e2b9}
+.resto-meta{display:flex;gap:12px;font-size:11px;color:var(--muted);margin:4px 0 6px;align-items:center}
+.resto-meta .open{color:#2e7530;font-weight:600}
+.resto-meta .closed{color:#a84732}
+.resto-sub{font-size:11.5px;color:var(--ink-light);margin-top:2px;line-height:1.4}
+.resto-links{display:flex;gap:12px;margin-top:8px;font-size:11px}
+.resto-links a{display:inline-flex;align-items:center;gap:4px;color:var(--sage-leaf);text-decoration:none;font-weight:600}
+.resto-links a:hover{text-decoration:underline}
+
+

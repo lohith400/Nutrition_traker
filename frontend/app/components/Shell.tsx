@@ -23,15 +23,15 @@ export const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").
 
 export type NavKey = "overview" | "log" | "custom" | "plans" | "grocery" | "reminders" | "progress" | "chat" | "profile" | "health";
 
-const NAV: { key: NavKey; label: string; href: string; Icon: typeof Home }[] = [
-  { key: "overview", label: "Overview", href: "/", Icon: Home },
-  { key: "log", label: "Food log", href: "/log", Icon: Utensils },
-  { key: "custom", label: "Custom foods", href: "/custom-foods", Icon: ChefHat },
-  { key: "plans", label: "Meal plans", href: "/meal-plans", Icon: Leaf },
-  { key: "grocery", label: "Grocery", href: "/grocery", Icon: ShoppingCart },
-  { key: "reminders", label: "Reminders", href: "/reminders", Icon: AlarmClock },
-  { key: "progress", label: "Progress", href: "/progress", Icon: Activity },
-  { key: "health", label: "Health", href: "/health", Icon: HeartPulse },
+const NAV: { key: NavKey; label: string; href: string; Icon: typeof Home; num: string }[] = [
+  { key: "overview", label: "Overview", href: "/", Icon: Home, num: "01" },
+  { key: "log", label: "Food log", href: "/log", Icon: Utensils, num: "02" },
+  { key: "custom", label: "Custom foods", href: "/custom-foods", Icon: ChefHat, num: "03" },
+  { key: "plans", label: "Meal plans", href: "/meal-plans", Icon: Leaf, num: "04" },
+  { key: "grocery", label: "Grocery", href: "/grocery", Icon: ShoppingCart, num: "05" },
+  { key: "reminders", label: "Reminders", href: "/reminders", Icon: AlarmClock, num: "06" },
+  { key: "progress", label: "Progress", href: "/progress", Icon: Activity, num: "07" },
+  { key: "health", label: "Health", href: "/health", Icon: HeartPulse, num: "08" },
 ];
 
 type Pattern = { pattern_type: string; description: string; detected_on: string };
@@ -180,8 +180,13 @@ export default function Shell({ active, crumb, actions, className = "", children
           <div><b>{display}&apos;s space</b><small>Personal plan</small></div>
         </Link>
 
+        <div className="contents-header almanac-mono">
+          <span>CONTENTS</span>
+          <span>VOL. 2026</span>
+        </div>
+
         <nav className="nav">
-          {NAV.map(({ key, label, href, Icon }) => (
+          {NAV.map(({ key, label, href, Icon, num }) => (
             <Link
               className={key === active ? "nav-item active" : "nav-item"}
               href={href}
@@ -189,7 +194,9 @@ export default function Shell({ active, crumb, actions, className = "", children
               aria-current={key === active ? "page" : undefined}
               onClick={() => setSidebarOpen(false)}
             >
-              <Icon size={18} />{label}
+              <span className="chapter-num">{num}</span>
+              <Icon size={17} />
+              <span>{label}</span>
             </Link>
           ))}
         </nav>
@@ -200,7 +207,9 @@ export default function Shell({ active, crumb, actions, className = "", children
             href="/chat"
             onClick={() => setSidebarOpen(false)}
           >
-            <MessageCircle size={18} />Coach chat
+            <span className="chapter-num">09</span>
+            <MessageCircle size={17} />
+            <span>Coach chat</span>
           </Link>
           <Link
             className={active === "profile" ? "profile-mini active" : "profile-mini"}
@@ -276,6 +285,35 @@ export default function Shell({ active, crumb, actions, className = "", children
           ))}
         </div>
       )}
+
+      {/* Compact Mobile Bottom Tab Navigation */}
+      <nav className="mobile-bottom-tabs" aria-label="Mobile Navigation">
+        <Link className={`mobile-bottom-tab ${active === "overview" ? "active" : ""}`} href="/" aria-label="Overview">
+          <Home size={19} />
+          <span>Home</span>
+        </Link>
+        <Link className={`mobile-bottom-tab ${active === "log" ? "active" : ""}`} href="/log" aria-label="Food Log">
+          <Utensils size={19} />
+          <span>Log</span>
+        </Link>
+        <Link className={`mobile-bottom-tab ${active === "chat" ? "active" : ""}`} href="/chat" aria-label="Coach Chat">
+          <MessageCircle size={19} />
+          <span>Coach</span>
+        </Link>
+        <Link className={`mobile-bottom-tab ${active === "health" ? "active" : ""}`} href="/health" aria-label="Health">
+          <HeartPulse size={19} />
+          <span>Health</span>
+        </Link>
+        <button
+          type="button"
+          className="mobile-bottom-tab"
+          onClick={() => setSidebarOpen(true)}
+          aria-label="Open full drawer menu"
+        >
+          <Menu size={19} />
+          <span>Index</span>
+        </button>
+      </nav>
     </main>
   );
 }
