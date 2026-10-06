@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Pencil, Search, Sparkles, Trash2, TrendingUp, X } from "lucide-react";
 import Shell from "../components/Shell";
 import { FoodOption, FoodOptionList, MEALS, Meal } from "../components/FoodOptions";
+import { FoodGlyph } from "../components/art/FoodGlyph";
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
@@ -124,10 +125,15 @@ function EntryRow({ meal, onChanged }: { meal: MealRow; onChanged: () => void })
 
   return (
     <div className="meal-row entry-row">
-      <div className="meal-icon mint">{MEAL_EMOJI[meal.meal_type] || "🥗"}</div>
-      <div className="meal-info"><b>{meal.food_name}</b><span>{meal.meal_type} · {meal.log_time?.slice(11, 16) || ""} · {amountLabel(meal)}</span></div>
-      <div className="macro-box"><b>{meal.calories}</b><span>kcal</span></div>
-      <div className="macro-box protein-box"><b>{meal.protein_g}g</b><span>protein</span></div>
+      <div className="meal-icon mint">
+        <FoodGlyph name={meal.food_name} mealType={meal.meal_type} size={28} />
+      </div>
+      <div className="meal-info">
+        <b>{meal.food_name}</b>
+        <span className="almanac-mono">{meal.meal_type} · {meal.log_time?.slice(11, 16) || ""} · {amountLabel(meal)}</span>
+      </div>
+      <div className="macro-box"><b className="tabular almanac-mono">{meal.calories}</b><span>kcal</span></div>
+      <div className="macro-box protein-box"><b className="tabular almanac-mono">{meal.protein_g}g</b><span>protein</span></div>
       {canEdit && (
         <div className="entry-actions">
           <button type="button" className="icon-mini" aria-label={`Edit ${meal.food_name}`} onClick={() => setEditing(e => !e)}><Pencil size={14} /></button>

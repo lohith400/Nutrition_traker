@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { Check, ChevronDown, Minus, Plus, Sparkles, Utensils } from "lucide-react";
 import { API } from "./Shell";
+import { FoodGlyph } from "./art/FoodGlyph";
+import { NutritionFacts } from "./art/NutritionFacts";
 
 export type Nutri = { calories: number; protein_g: number; carbs_g: number; fat_g: number };
 export type FoodOption = {
@@ -121,13 +123,16 @@ export function FoodOptionRow({ option, defaultQty = 1, defaultUnit = "serving",
   return (
     <div className={`fo-row ${open ? "open" : ""} ${done ? "done" : ""}`}>
       <button type="button" className="fo-head" onClick={() => !done && setOpen(o => !o)} aria-expanded={open}>
-        <div className="fo-title">
-          <b>{option.food_name}</b>
-          <div className="fo-tags">
-            <span className={`fo-tag src-${option.source}`}>{SOURCE_LABEL[option.source]}</span>
-            {option.exact && <span className="fo-tag exact">Exact name</span>}
-            {option.logged_before && <span className="fo-tag fav">You&apos;ve had this</span>}
-            {option.quality === "unreliable" && <span className="fo-tag warn">Rough data</span>}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: 0 }}>
+          <FoodGlyph name={option.food_name} size={28} />
+          <div className="fo-title">
+            <b>{option.food_name}</b>
+            <div className="fo-tags">
+              <span className={`fo-tag src-${option.source}`}>{SOURCE_LABEL[option.source]}</span>
+              {option.exact && <span className="fo-tag exact">Exact name</span>}
+              {option.logged_before && <span className="fo-tag fav">You&apos;ve had this</span>}
+              {option.quality === "unreliable" && <span className="fo-tag warn">Rough data</span>}
+            </div>
           </div>
         </div>
         {headline && (
@@ -167,6 +172,25 @@ export function FoodOptionRow({ option, defaultQty = 1, defaultUnit = "serving",
             </select>
           </div>
           {preview && <MacroChips n={preview} big />}
+
+          {/* Classic Printed Nutrition Facts Label */}
+          <details className="fo-more" style={{ marginTop: "12px", marginBottom: "8px" }}>
+            <summary className="almanac-mono" style={{ cursor: "pointer", fontSize: "11px", color: "var(--sage-leaf)", fontWeight: 600 }}>
+              View Printed Nutrition Facts Label ▾
+            </summary>
+            <div style={{ marginTop: "8px" }}>
+              <NutritionFacts
+                title={option.food_name}
+                subtitle={unit === "serving" ? `Serving (${qty} portion)` : `${qty} grams`}
+                calories={preview ? preview.calories : (headline?.calories || 0)}
+                protein_g={preview ? preview.protein_g : (headline?.protein_g || 0)}
+                carbs_g={preview ? preview.carbs_g : (headline?.carbs_g || 0)}
+                fat_g={preview ? preview.fat_g : (headline?.fat_g || 0)}
+                compact
+              />
+            </div>
+          </details>
+
           {error && <p className="fo-error">{error}</p>}
           <button type="button" className="primary-btn fo-log" disabled={!valid || busy} onClick={log}>
             <Utensils size={14} /> {busy ? "Logging…" : date ? `Log for ${date}` : "Log this one"}
