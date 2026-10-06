@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Flame, Scale, Trash2, TrendingDown, TrendingUp } from "lucide-react";
 import { API } from "../components/Shell";
+import { FoodGlyph } from "../components/art/FoodGlyph";
 
 type WeightEntry = { log_date: string; weight_kg: number; note?: string | null };
 
@@ -204,8 +205,16 @@ export function Consistency({ calorieTarget, proteinTarget }: { calorieTarget: n
   return (
     <section className="panel consistency">
       <div className="panel-head">
-        <div><h3>Consistency</h3><p>Last 5 weeks. Darker means calories in range and protein met.</p></div>
-        <div className="streak"><Flame size={16} /><b>{streak}</b><span>day streak</span></div>
+        <div>
+          <span className="almanac-eyebrow">HABIT BOTANY</span>
+          <h3 className="almanac-serif">Consistency &amp; Rhythm</h3>
+          <p>Last 5 weeks. Darker cells indicate caloric discipline and protein targets met.</p>
+        </div>
+        <div className="streak stamp-tag sage" style={{ padding: "6px 14px", borderRadius: "99px" }}>
+          <FoodGlyph name="sprout" size={19} />
+          <b className="tabular almanac-mono" style={{ fontSize: "16px" }}>{streak}</b>
+          <span>day streak</span>
+        </div>
       </div>
       <div className="heat">
         {["M", "T", "W", "T", "F", "S", "S"].map((l, i) => <small key={i} className="heat-lbl">{l}</small>)}

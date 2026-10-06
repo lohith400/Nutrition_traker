@@ -95,8 +95,13 @@ export default function HealthPage() {
       <div className="page-wrap hx-page">
         <div className="hero-row">
           <div>
-            <h1>Health &amp; Movement <span>✦</span></h1>
-            <p className="subtitle">What you eat, what you burn, and what it means for you, from your food log and Google Fit.</p>
+            <div className="almanac-eyebrow">
+              <span>METABOLIC LEDGER</span>
+              <span className="dot-sep">·</span>
+              <span>GOOGLE FIT SYNC</span>
+            </div>
+            <h1 className="almanac-serif">Health &amp; Movement <span>✦</span></h1>
+            <p className="subtitle">What you eat, what you burn, and what it means for your body from your food log and Google Fit.</p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
             {today?.status === "ok" && <span className="hx-live"><i />Google Fit{today.synced_at ? ` · ${today.synced_at.slice(11, 16)}` : " · live"}</span>}

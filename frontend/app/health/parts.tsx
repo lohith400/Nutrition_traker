@@ -65,34 +65,38 @@ export function BalanceScale({ eaten, burned }: { eaten: number; burned: number 
   const items = (n: number, cx: number, cy: number, set: string[]) =>
     Array.from({ length: n }, (_, i) => {
       const row = Math.floor(i / 4), col = i % 4, inRow = Math.min(4, n - row * 4);
-      return <text key={i} x={cx + (col - (inRow - 1) / 2) * 27} y={cy - row * 27} fontSize="22" textAnchor="middle">{set[i % set.length]}</text>;
+      return <text key={i} x={cx + (col - (inRow - 1) / 2) * 27} y={cy - row * 27} fontSize="20" textAnchor="middle">{set[i % set.length]}</text>;
     });
   const pan = (cx: number, cy: number, fill: string) => (
     <g>
-      <line x1={cx} y1={cy} x2={cx - 54} y2={cy + 78} stroke="#b9ad98" strokeWidth="1.5" />
-      <line x1={cx} y1={cy} x2={cx + 54} y2={cy + 78} stroke="#b9ad98" strokeWidth="1.5" />
-      <path d={`M ${cx - 62} ${cy + 78} Q ${cx} ${cy + 130} ${cx + 62} ${cy + 78} Z`} fill={fill} stroke="#d9cfbd" />
-      <line x1={cx - 62} y1={cy + 78} x2={cx + 62} y2={cy + 78} stroke="#c9bda5" strokeWidth="3" strokeLinecap="round" />
+      <line x1={cx} y1={cy} x2={cx - 54} y2={cy + 78} stroke="#8c8270" strokeWidth="1.5" />
+      <line x1={cx} y1={cy} x2={cx + 54} y2={cy + 78} stroke="#8c8270" strokeWidth="1.5" />
+      <path d={`M ${cx - 62} ${cy + 78} Q ${cx} ${cy + 130} ${cx + 62} ${cy + 78} Z`} fill={fill} stroke="#c9bfae" strokeWidth="1.5" />
+      <line x1={cx - 62} y1={cy + 78} x2={cx + 62} y2={cy + 78} stroke="#6e6556" strokeWidth="3" strokeLinecap="round" />
     </g>
   );
   const tone = Math.abs(diff) < 100 ? "even" : diff < 0 ? "deficit" : "surplus";
   return (
     <div className="hx-scale">
       <svg viewBox="0 0 440 262" role="img" aria-label={`Eaten ${fmt(eaten)} kilocalories, burned ${fmt(burned)}`}>
-        <path d={`M ${px - 7} ${py + 9} L ${px - 13} 238 L ${px + 13} 238 L ${px + 7} ${py + 9} Z`} fill="#d8cfbf" />
-        <rect x={px - 62} y="238" width="124" height="13" rx="6.5" fill="#bfb39d" />
-        <line x1={lx} y1={ly} x2={rx} y2={ry} stroke="#8d7a5f" strokeWidth="8" strokeLinecap="round" />
-        {pan(lx, ly, "#f6e6d8")}{pan(rx, ry, "#e3eddf")}
+        {/* Solid Brass Center Fulcrum Stand */}
+        <path d={`M ${px - 7} ${py + 9} L ${px - 14} 238 L ${px + 14} 238 L ${px + 7} ${py + 9} Z`} fill="#d5cca8" stroke="#877c57" strokeWidth="1.2" />
+        <rect x={px - 62} y="238" width="124" height="13" rx="4" fill="#a6996d" stroke="#695f3b" strokeWidth="1" />
+        {/* Tilting Wooden Balance Beam */}
+        <line x1={lx} y1={ly} x2={rx} y2={ry} stroke="#695133" strokeWidth="8" strokeLinecap="round" />
+        <line x1={lx} y1={ly} x2={rx} y2={ry} stroke="#8c704a" strokeWidth="3" strokeLinecap="round" strokeDasharray="6 8" />
+        {pan(lx, ly, "#faf1ea")}{pan(rx, ry, "#eef5ed")}
         {items(food, lx, ly + 70, ["🍛", "🥗", "🍎", "🍞"])}
-        {items(shoes, rx, ry + 70, ["👟"])}
-        <circle cx={px} cy={py} r="10" fill="#2f4d42" /><circle cx={px} cy={py} r="3.5" fill="#f5f3ee" />
+        {items(shoes, rx, ry + 70, ["🔥", "⚡", "👟"])}
+        <circle cx={px} cy={py} r="10" fill="#2f4d42" stroke="#d5cca8" strokeWidth="2" />
+        <circle cx={px} cy={py} r="3.5" fill="#fcfaf5" />
       </svg>
       <div className="hx-scale-legend">
-        <div><small>Eaten</small><b style={{ color: "var(--coral)" }}>{fmt(eaten)}</b><span>kcal</span></div>
-        <div className={`hx-verdict ${tone}`}>
-          {tone === "even" ? "Balanced" : tone === "deficit" ? `${fmt(-diff)} kcal deficit` : `${fmt(diff)} kcal surplus`}
+        <div><small className="almanac-eyebrow">FOOD EATEN</small><b className="tabular almanac-serif" style={{ color: "var(--terracotta)", fontSize: "22px" }}>{fmt(eaten)}</b><span className="almanac-mono">kcal</span></div>
+        <div className={`hx-verdict stamp-tag ${tone === "deficit" ? "sage" : tone === "surplus" ? "tomato" : "mustard"}`}>
+          {tone === "even" ? "✦ Balanced State" : tone === "deficit" ? `✦ ${fmt(-diff)} kcal deficit` : `✦ ${fmt(diff)} kcal surplus`}
         </div>
-        <div><small>Burned</small><b style={{ color: "var(--green-dark)" }}>{fmt(burned)}</b><span>kcal</span></div>
+        <div><small className="almanac-eyebrow">ENERGY BURNED</small><b className="tabular almanac-serif" style={{ color: "var(--sage-leaf)", fontSize: "22px" }}>{fmt(burned)}</b><span className="almanac-mono">kcal</span></div>
       </div>
     </div>
   );
@@ -151,16 +155,24 @@ export function Tile(p: { icon: ReactNode; color: string; label: string; num?: n
   text?: string; sub?: string; spark?: number[]; missing?: boolean; hint?: string }) {
   const t = useTween(p.num ?? 0, 900);
   const has = p.text !== undefined || (p.num !== undefined && p.num !== null);
+  const isSteps = p.label.toLowerCase().includes("step");
+  const stepPct = isSteps && p.num ? Math.min(100, Math.round((p.num / 10000) * 100)) : 0;
+
   return (
     <div className={`hx-tile ${has ? "" : "empty"}`} style={{ ["--tc" as string]: p.color }}>
       <div className="hx-tile-top"><span className="hx-tile-icon">{p.icon}</span>{p.label}</div>
       {has ? (
-        <div className="hx-tile-val">{p.text ?? (p.decimals ? t.toFixed(p.decimals) : fmt(t))}{p.unit && <small> {p.unit}</small>}</div>
+        <div className="hx-tile-val tabular">{p.text ?? (p.decimals ? t.toFixed(p.decimals) : fmt(t))}{p.unit && <small> {p.unit}</small>}</div>
       ) : (
         <div className="hx-tile-na">{p.missing ? "Not shared yet" : "No data today"}</div>
       )}
+      {isSteps && has && (
+        <div className="hx-footprint-trail" style={{ margin: "4px 0", height: "4px", background: "rgba(0,0,0,0.06)", borderRadius: "2px", overflow: "hidden" }}>
+          <div style={{ width: `${stepPct}%`, height: "100%", background: p.color, borderRadius: "2px" }} />
+        </div>
+      )}
       <div className="hx-tile-foot">
-        <span>{has ? p.sub : p.missing ? p.hint : p.sub}</span>
+        <span className="almanac-mono">{has ? p.sub : p.missing ? p.hint : p.sub}</span>
         {p.spark && <Spark data={p.spark} color={p.color} />}
       </div>
     </div>
