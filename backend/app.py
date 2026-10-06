@@ -615,3 +615,137 @@ def delete_custom_food(food_id: int):
 def grocery_nutrition():
     """What the pantry is worth: per-item nutrition (raw values where known) and a total for items measured by weight/volume."""
     return grocery.nutrition_overview()
+
+
+# ---------------------------------------------------------------------------
+# Micronutrients & Vitamins (ICMR-NIN 2020 RDA)
+# ---------------------------------------------------------------------------
+NUTRIENT_METADATA = {
+    "fibre_g": {"name": "Dietary Fibre", "category": "macro", "unit": "g"},
+    "calcium_mg": {"name": "Calcium", "category": "mineral", "unit": "mg"},
+    "magnesium_mg": {"name": "Magnesium", "category": "mineral", "unit": "mg"},
+    "sodium_mg": {"name": "Sodium", "category": "mineral", "unit": "mg"},
+    "potassium_mg": {"name": "Potassium", "category": "mineral", "unit": "mg"},
+    "iron_mg": {"name": "Iron", "category": "mineral", "unit": "mg"},
+    "copper_mg": {"name": "Copper", "category": "mineral", "unit": "mg"},
+    "zinc_mg": {"name": "Zinc", "category": "mineral", "unit": "mg"},
+    "vita_ug": {"name": "Vitamin A", "category": "vitamin", "unit": "µg"},
+    "vite_mg": {"name": "Vitamin E", "category": "vitamin", "unit": "mg"},
+    "vitd_ug": {"name": "Vitamin D", "category": "vitamin", "unit": "µg"},
+    "vitk_ug": {"name": "Vitamin K", "category": "vitamin", "unit": "µg"},
+    "folate_ug": {"name": "Folate (B9)", "category": "vitamin", "unit": "µg"},
+    "vitb1_mg": {"name": "Thiamine (B1)", "category": "vitamin", "unit": "mg"},
+    "vitb2_mg": {"name": "Riboflavin (B2)", "category": "vitamin", "unit": "mg"},
+    "vitb3_mg": {"name": "Niacin (B3)", "category": "vitamin", "unit": "mg"},
+    "vitb5_mg": {"name": "Pantothenic Acid (B5)", "category": "vitamin", "unit": "mg"},
+    "vitb6_mg": {"name": "Vitamin B6", "category": "vitamin", "unit": "mg"},
+    "vitb7_ug": {"name": "Biotin (B7)", "category": "vitamin", "unit": "µg"},
+    "vitc_mg": {"name": "Vitamin C", "category": "vitamin", "unit": "mg"},
+}
+
+
+def _compute_day_micronutrients(day: str):
+    conn = memory_agent._get_conn()
+    try:
+        user_row = conn.execute("SELECT sex FROM user_profile WHERE id = 1").fetchone()
+        sex = "female" if user_row and user_row["sex"] and str(user_row["sex"]).lower() in ("f", "female") else "male"
+        logs = conn.execute(
+            "SELECT food_code, food_name, quantity, COALESCE(unit, 'serving') as unit FROM daily_logs WHERE log_date = ?",
+            (day,)
+        ).fetchall()
+    finally:
+        conn.close()
+
+    rdas = math_engine.ICMR_NIN_2020_RDA.get(sex, math_engine.ICMR_NIN_2020_RDA["male"])
+
+    totals = {k: 0.0 for k in NUTRIENT_METADATA}
+    food_contributions = {k: [] for k in NUTRIENT_METADATA}
+    foods_with_data_count = 0
+
+    for log in logs:
+        code = log["food_code"]
+        qty = log["quantity"]
+        unit = log["unit"]
+        if not code:
+            continue
+        macros = math_engine.calculate_meal_macros(code, qty, unit)
+        if "error" in macros:
+            continue
+
+        had_data = False
+        # Fibre
+        if macros.get("fibre_g") is not None:
+            had_data = True
+            fib = float(macros["fibre_g"])
+            totals["fibre_g"] += fib
+            food_contributions["fibre_g"].append({"food_name": macros["food_name"], "amount": fib})
+
+        # Micros
+        micros = macros.get("micros")
+        if micros and isinstance(micros, dict):
+            for k, val in micros.items():
+                if val is not None and k in totals:
+                    had_data = True
+                    amt = float(val)
+                    totals[k] += amt
+                    food_contributions[k].append({"food_name": macros["food_name"], "amount": amt})
+
+        if had_data:
+            foods_with_data_count += 1
+
+    nutrients = []
+    has_logs = len(logs) > 0
+    has_data = foods_with_data_count > 0
+
+    for key, meta in NUTRIENT_METADATA.items():
+        rda = rdas.get(key)
+        tot = round(totals[key], 1) if has_data else (0.0 if has_logs else None)
+        pct = round((tot / rda) * 100, 1) if (tot is not None and rda and rda > 0) else None
+
+        # Sort top contributors
+        contribs = sorted(food_contributions[key], key=lambda x: x["amount"], reverse=True)
+        top = contribs[:3]
+
+        if tot is None:
+            status = "unknown"
+        elif pct is not None and pct >= 100:
+            status = "optimal"
+        elif pct is not None and pct >= 70:
+            status = "moderate"
+        else:
+            status = "low"
+
+        nutrients.append({
+            "key": key,
+            "name": meta["name"],
+            "category": meta["category"],
+            "unit": meta["unit"],
+            "amount": tot,
+            "rda": rda,
+            "pct_rda": pct,
+            "status": status,
+            "top_foods": top,
+        })
+
+    return {
+        "date": day,
+        "sex": sex,
+        "has_data": has_data,
+        "logs_count": len(logs),
+        "totals": {k: round(v, 1) for k, v in totals.items()} if has_data else {},
+        "rdas": rdas,
+        "nutrients": nutrients,
+    }
+
+
+@app.get("/api/micronutrients/today")
+def get_today_micronutrients():
+    today = datetime.now().strftime("%Y-%m-%d")
+    return _compute_day_micronutrients(today)
+
+
+@app.get("/api/micronutrients")
+def get_micronutrients(date: str | None = None):
+    day = _valid_log_date(date) or datetime.now().strftime("%Y-%m-%d")
+    return _compute_day_micronutrients(day)
+

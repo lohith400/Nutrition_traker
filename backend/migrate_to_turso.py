@@ -40,7 +40,7 @@ def main(src_path: str) -> None:
         rows = src.execute(f"SELECT {', '.join(cols)} FROM {name}").fetchall()
         if name == "food_items":
             try:
-                dst_count = dst.execute("SELECT COUNT(*) FROM food_items").fetchone()[0]
+                dst_count = dst.execute("SELECT COUNT(*) FROM food_items WHERE calcium_mg_100g IS NOT NULL").fetchone()[0]
                 if dst_count == len(rows):
                     print(f"  {name}: {dst_count} rows already up to date, skipping")
                     continue
@@ -48,8 +48,9 @@ def main(src_path: str) -> None:
                 pass
         if rows:
             marks = ", ".join("?" for _ in cols)
-            for i in range(0, len(rows), 200):
-                dst.executemany(f"INSERT OR REPLACE INTO {name} ({', '.join(cols)}) VALUES ({marks})", rows[i:i + 200])
+            chunk_size = 25 if name == "food_items" else 100
+            for i in range(0, len(rows), chunk_size):
+                dst.executemany(f"INSERT OR REPLACE INTO {name} ({', '.join(cols)}) VALUES ({marks})", rows[i:i + chunk_size])
             dst.commit()
         print(f"  {name}: {len(rows)} rows copied")
     dst.close()

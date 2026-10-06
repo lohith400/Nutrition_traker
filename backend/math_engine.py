@@ -115,6 +115,116 @@ def calculate_targets(tdee, goal, weight_kg):
     }
 
 
+# ---------------------------------------------------------------------------
+# ICMR-NIN 2020 Recommended Dietary Allowances (RDA) for Indian Adults
+# Source: "Nutrient Requirements for Indians: Recommended Dietary Allowances (RDA)
+# and Estimated Average Requirements (EAR) - 2020", National Institute of Nutrition
+# (ICMR-NIN), Hyderabad. Reference body weights: 65 kg (men), 55 kg (women).
+# ---------------------------------------------------------------------------
+ICMR_NIN_2020_RDA = {
+    "male": {
+        "fibre_g": 35.0,        # 30-40g based on 2000-2400 kcal requirement
+        "calcium_mg": 1000.0,
+        "magnesium_mg": 440.0,
+        "sodium_mg": 2000.0,     # Safe intake / daily upper intake guidance
+        "potassium_mg": 3500.0,
+        "iron_mg": 19.0,
+        "copper_mg": 1.7,
+        "zinc_mg": 17.0,
+        "vita_ug": 1000.0,       # Retinol activity equivalents (RAE)
+        "vite_mg": 10.0,         # alpha-tocopherol
+        "vitd_ug": 15.0,         # 600 IU
+        "vitk_ug": 55.0,
+        "folate_ug": 300.0,
+        "vitb1_mg": 1.8,         # Thiamine
+        "vitb2_mg": 2.5,         # Riboflavin
+        "vitb3_mg": 18.0,        # Niacin
+        "vitb5_mg": 5.0,         # Pantothenic acid (AI / standard reference)
+        "vitb6_mg": 2.4,         # Pyridoxine
+        "vitb7_ug": 30.0,        # Biotin (AI)
+        "vitc_mg": 80.0,
+    },
+    "female": {
+        "fibre_g": 30.0,
+        "calcium_mg": 1000.0,
+        "magnesium_mg": 370.0,
+        "sodium_mg": 2000.0,
+        "potassium_mg": 3500.0,
+        "iron_mg": 29.0,
+        "copper_mg": 1.7,
+        "zinc_mg": 13.2,
+        "vita_ug": 840.0,
+        "vite_mg": 7.5,
+        "vitd_ug": 15.0,
+        "vitk_ug": 55.0,
+        "folate_ug": 220.0,
+        "vitb1_mg": 1.4,
+        "vitb2_mg": 1.9,
+        "vitb3_mg": 14.0,
+        "vitb5_mg": 5.0,
+        "vitb6_mg": 1.9,
+        "vitb7_ug": 30.0,
+        "vitc_mg": 65.0,
+    },
+}
+
+
+def _extract_micros(row, scale: float, prefix: str = "unit_serving_") -> dict:
+    """Extract and scale micronutrient dictionary from a database row."""
+    keys = row.keys() if hasattr(row, "keys") else []
+
+    def get_val(col_name):
+        if col_name in keys and row[col_name] is not None:
+            try:
+                return float(row[col_name])
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    def calc(col_name):
+        v = get_val(col_name)
+        return round(v * scale, 2) if v is not None else None
+
+    # Vit D sum
+    d2 = get_val(f"{prefix}vitd2_ug" if prefix else "vitd2_ug_100g")
+    d3 = get_val(f"{prefix}vitd3_ug" if prefix else "vitd3_ug_100g")
+    vitd = round(((d2 or 0) + (d3 or 0)) * scale, 2) if (d2 is not None or d3 is not None) else None
+
+    # Vit K sum
+    k1 = get_val(f"{prefix}vitk1_ug" if prefix else "vitk1_ug_100g")
+    k2 = get_val(f"{prefix}vitk2_ug" if prefix else "vitk2_ug_100g")
+    vitk = round(((k1 or 0) + (k2 or 0)) * scale, 2) if (k1 is not None or k2 is not None) else None
+
+    # Folate fallback (folate_ug or vitb9_ug)
+    fol = get_val(f"{prefix}folate_ug" if prefix else "folate_ug_100g")
+    if fol is None:
+        fol = get_val(f"{prefix}vitb9_ug" if prefix else "vitb9_ug_100g")
+    folate = round(fol * scale, 2) if fol is not None else None
+
+    micros = {
+        "calcium_mg": calc(f"{prefix}calcium_mg" if prefix else "calcium_mg_100g"),
+        "magnesium_mg": calc(f"{prefix}magnesium_mg" if prefix else "magnesium_mg_100g"),
+        "sodium_mg": calc(f"{prefix}sodium_mg" if prefix else "sodium_mg_100g"),
+        "potassium_mg": calc(f"{prefix}potassium_mg" if prefix else "potassium_mg_100g"),
+        "iron_mg": calc(f"{prefix}iron_mg" if prefix else "iron_mg_100g"),
+        "copper_mg": calc(f"{prefix}copper_mg" if prefix else "copper_mg_100g"),
+        "zinc_mg": calc(f"{prefix}zinc_mg" if prefix else "zinc_mg_100g"),
+        "vita_ug": calc(f"{prefix}vita_ug" if prefix else "vita_ug_100g"),
+        "vite_mg": calc(f"{prefix}vite_mg" if prefix else "vite_mg_100g"),
+        "vitd_ug": vitd,
+        "vitk_ug": vitk,
+        "folate_ug": folate,
+        "vitb1_mg": calc(f"{prefix}vitb1_mg" if prefix else "vitb1_mg_100g"),
+        "vitb2_mg": calc(f"{prefix}vitb2_mg" if prefix else "vitb2_mg_100g"),
+        "vitb3_mg": calc(f"{prefix}vitb3_mg" if prefix else "vitb3_mg_100g"),
+        "vitb5_mg": calc(f"{prefix}vitb5_mg" if prefix else "vitb5_mg_100g"),
+        "vitb6_mg": calc(f"{prefix}vitb6_mg" if prefix else "vitb6_mg_100g"),
+        "vitb7_ug": calc(f"{prefix}vitb7_ug" if prefix else "vitb7_ug_100g"),
+        "vitc_mg": calc(f"{prefix}vitc_mg" if prefix else "vitc_mg_100g"),
+    }
+    return micros
+
+
 def calculate_meal_macros(food_code: str, quantity: float, unit: str = "serving") -> dict:
     """
     Given a resolved food_code and a quantity, returns exact macros.
@@ -145,7 +255,11 @@ def calculate_meal_macros(food_code: str, quantity: float, unit: str = "serving"
             from backend import custom_foods
         except ImportError:
             import custom_foods
-        return custom_foods.macros_for(str(food_code), quantity, unit)
+        res = custom_foods.macros_for(str(food_code), quantity, unit)
+        if isinstance(res, dict) and "error" not in res:
+            res["fibre_g"] = None
+            res["micros"] = None
+        return res
 
     conn = _get_conn()
     try:
@@ -169,6 +283,10 @@ def calculate_meal_macros(food_code: str, quantity: float, unit: str = "serving"
                 "quality": quality,
                 "fallback_unit": "grams",
             }
+        keys = row.keys() if hasattr(row, "keys") else []
+        serv_fib = row["unit_serving_fibre_g"] if "unit_serving_fibre_g" in keys else None
+        fibre_val = round(serv_fib * quantity, 1) if serv_fib is not None else None
+        micros_val = _extract_micros(row, quantity, prefix="unit_serving_")
         result = {
             "food_code": food_code,
             "food_name": row["food_name"],
@@ -179,11 +297,17 @@ def calculate_meal_macros(food_code: str, quantity: float, unit: str = "serving"
             "protein_g": round((row["unit_serving_protein_g"] or 0) * quantity, 1),
             "carbs_g": round((row["unit_serving_carb_g"] or 0) * quantity, 1),
             "fat_g": round((row["unit_serving_fat_g"] or 0) * quantity, 1),
+            "fibre_g": fibre_val,
+            "micros": micros_val,
         }
     else:  # grams
         if not (row["energy_kcal_100g"] or 0):
             return {"error": f"No per-100g nutrition data for '{row['food_name']}'.", "food_name": row["food_name"]}
         factor = quantity / 100.0
+        keys = row.keys() if hasattr(row, "keys") else []
+        fib_100 = row["fibre_g_100g"] if "fibre_g_100g" in keys else None
+        fibre_val = round(fib_100 * factor, 1) if fib_100 is not None else None
+        micros_val = _extract_micros(row, factor, prefix="")
         result = {
             "food_code": food_code,
             "food_name": row["food_name"],
@@ -194,6 +318,8 @@ def calculate_meal_macros(food_code: str, quantity: float, unit: str = "serving"
             "protein_g": round((row["protein_g_100g"] or 0) * factor, 1),
             "carbs_g": round((row["carb_g_100g"] or 0) * factor, 1),
             "fat_g": round((row["fat_g_100g"] or 0) * factor, 1),
+            "fibre_g": fibre_val,
+            "micros": micros_val,
         }
 
     result["quality"] = quality

@@ -57,7 +57,51 @@ CREATE TABLE IF NOT EXISTS food_items (
     unit_serving_carb_g      REAL,
     unit_serving_protein_g   REAL,
     unit_serving_fat_g       REAL,
-    unit_serving_fibre_g     REAL
+    unit_serving_fibre_g     REAL,
+    calcium_mg_100g          REAL,
+    magnesium_mg_100g        REAL,
+    sodium_mg_100g           REAL,
+    potassium_mg_100g        REAL,
+    iron_mg_100g             REAL,
+    copper_mg_100g           REAL,
+    zinc_mg_100g             REAL,
+    vita_ug_100g             REAL,
+    vite_mg_100g             REAL,
+    vitd2_ug_100g            REAL,
+    vitd3_ug_100g            REAL,
+    vitk1_ug_100g            REAL,
+    vitk2_ug_100g            REAL,
+    folate_ug_100g           REAL,
+    vitb1_mg_100g            REAL,
+    vitb2_mg_100g            REAL,
+    vitb3_mg_100g            REAL,
+    vitb5_mg_100g            REAL,
+    vitb6_mg_100g            REAL,
+    vitb7_ug_100g            REAL,
+    vitb9_ug_100g            REAL,
+    vitc_mg_100g             REAL,
+    unit_serving_calcium_mg  REAL,
+    unit_serving_magnesium_mg REAL,
+    unit_serving_sodium_mg   REAL,
+    unit_serving_potassium_mg REAL,
+    unit_serving_iron_mg     REAL,
+    unit_serving_copper_mg   REAL,
+    unit_serving_zinc_mg     REAL,
+    unit_serving_vita_ug     REAL,
+    unit_serving_vite_mg     REAL,
+    unit_serving_vitd2_ug    REAL,
+    unit_serving_vitd3_ug    REAL,
+    unit_serving_vitk1_ug    REAL,
+    unit_serving_vitk2_ug    REAL,
+    unit_serving_folate_ug   REAL,
+    unit_serving_vitb1_mg    REAL,
+    unit_serving_vitb2_mg    REAL,
+    unit_serving_vitb3_mg    REAL,
+    unit_serving_vitb5_mg    REAL,
+    unit_serving_vitb6_mg    REAL,
+    unit_serving_vitb7_ug    REAL,
+    unit_serving_vitb9_ug    REAL,
+    unit_serving_vitc_mg     REAL
 );
 
 CREATE TABLE IF NOT EXISTS user_profile (
@@ -218,6 +262,56 @@ CREATE TABLE IF NOT EXISTS daily_fitness (
 );
 """
 
+MICRONUTRIENT_COLS_100G = [
+    ("calcium_mg", "calcium_mg_100g"),
+    ("magnesium_mg", "magnesium_mg_100g"),
+    ("sodium_mg", "sodium_mg_100g"),
+    ("potassium_mg", "potassium_mg_100g"),
+    ("iron_mg", "iron_mg_100g"),
+    ("copper_mg", "copper_mg_100g"),
+    ("zinc_mg", "zinc_mg_100g"),
+    ("vita_ug", "vita_ug_100g"),
+    ("vite_mg", "vite_mg_100g"),
+    ("vitd2_ug", "vitd2_ug_100g"),
+    ("vitd3_ug", "vitd3_ug_100g"),
+    ("vitk1_ug", "vitk1_ug_100g"),
+    ("vitk2_ug", "vitk2_ug_100g"),
+    ("folate_ug", "folate_ug_100g"),
+    ("vitb1_mg", "vitb1_mg_100g"),
+    ("vitb2_mg", "vitb2_mg_100g"),
+    ("vitb3_mg", "vitb3_mg_100g"),
+    ("vitb5_mg", "vitb5_mg_100g"),
+    ("vitb6_mg", "vitb6_mg_100g"),
+    ("vitb7_ug", "vitb7_ug_100g"),
+    ("vitb9_ug", "vitb9_ug_100g"),
+    ("vitc_mg", "vitc_mg_100g"),
+]
+
+MICRONUTRIENT_SERVING_COLS = [
+    ("unit_serving_calcium_mg", "unit_serving_calcium_mg"),
+    ("unit_serving_magnesium_mg", "unit_serving_magnesium_mg"),
+    ("unit_serving_sodium_mg", "unit_serving_sodium_mg"),
+    ("unit_serving_potassium_mg", "unit_serving_potassium_mg"),
+    ("unit_serving_iron_mg", "unit_serving_iron_mg"),
+    ("unit_serving_copper_mg", "unit_serving_copper_mg"),
+    ("unit_serving_zinc_mg", "unit_serving_zinc_mg"),
+    ("unit_serving_vita_ug", "unit_serving_vita_ug"),
+    ("unit_serving_vite_mg", "unit_serving_vite_mg"),
+    ("unit_serving_vitd2_ug", "unit_serving_vitd2_ug"),
+    ("unit_serving_vitd3_ug", "unit_serving_vitd3_ug"),
+    ("unit_serving_vitk1_ug", "unit_serving_vitk1_ug"),
+    ("unit_serving_vitk2_ug", "unit_serving_vitk2_ug"),
+    ("unit_serving_folate_ug", "unit_serving_folate_ug"),
+    ("unit_serving_vitb1_mg", "unit_serving_vitb1_mg"),
+    ("unit_serving_vitb2_mg", "unit_serving_vitb2_mg"),
+    ("unit_serving_vitb3_mg", "unit_serving_vitb3_mg"),
+    ("unit_serving_vitb5_mg", "unit_serving_vitb5_mg"),
+    ("unit_serving_vitb6_mg", "unit_serving_vitb6_mg"),
+    ("unit_serving_vitb7_ug", "unit_serving_vitb7_ug"),
+    ("unit_serving_vitb9_ug", "unit_serving_vitb9_ug"),
+    ("unit_serving_vitc_mg", "unit_serving_vitc_mg"),
+]
+
 # Columns added after the first release. (table, column, DDL type)
 MIGRATIONS = [
     ("food_items", "serving_grams", "REAL"),
@@ -229,6 +323,9 @@ MIGRATIONS = [
     ("user_profile", "diet", "TEXT DEFAULT 'any'"),
     ("user_profile", "photo_data", "TEXT"),
     ("daily_fitness", "extras", "TEXT"),
+] + [
+    ("food_items", target_col, "REAL")
+    for _, target_col in MICRONUTRIENT_COLS_100G + MICRONUTRIENT_SERVING_COLS
 ]
 
 
@@ -236,15 +333,34 @@ def _columns(conn, table):
     return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
+def _safe_float(val):
+    if val is None or val == "":
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
 def refresh_food_quality(conn) -> int:
     """(Re)grade every food row. Cheap (1k rows), idempotent."""
     conn.row_factory = sqlite3.Row
     rows = conn.execute("SELECT * FROM food_items").fetchall()
+    updates = []
     for r in rows:
         q = food_quality.assess(r)
-        conn.execute(
+        updates.append((
+            q["quality"],
+            q["quality_note"],
+            q["serving_grams"],
+            food_quality.diet_tag(r["food_name"]),
+            r["food_code"],
+        ))
+    chunk_size = 100
+    for i in range(0, len(updates), chunk_size):
+        conn.executemany(
             "UPDATE food_items SET quality=?, quality_note=?, serving_grams=?, diet_tag=? WHERE food_code=?",
-            (q["quality"], q["quality_note"], q["serving_grams"], food_quality.diet_tag(r["food_name"]), r["food_code"]),
+            updates[i : i + chunk_size],
         )
     return len(rows)
 
@@ -269,9 +385,13 @@ def ensure_schema(db_path=None) -> None:
     path = db_path or DB_PATH
     conn = get_db_connection(path)
     conn.executescript(SCHEMA)
+    existing_cols = {}
     for table, column, ddl in MIGRATIONS:
-        if column not in _columns(conn, table):
+        if table not in existing_cols:
+            existing_cols[table] = _columns(conn, table)
+        if column not in existing_cols[table]:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+            existing_cols[table].add(column)
 
     # Old versions inserted a fresh pattern row on every chat message. Keep the
     # newest per type, then enforce one-row-per-type going forward.
@@ -286,6 +406,21 @@ def ensure_schema(db_path=None) -> None:
         "SELECT COUNT(*) FROM food_items WHERE quality IS NULL"
     ).fetchone()[0]
     if needs_grading:
+        refresh_food_quality(conn)
+
+    # Check if micronutrients need loading in existing food_items (e.g. if calcium_mg_100g is all NULL)
+    needs_micros = False
+    try:
+        sample = conn.execute("SELECT COUNT(*) FROM food_items WHERE calcium_mg_100g IS NOT NULL").fetchone()
+        if sample and sample[0] == 0:
+            count = conn.execute("SELECT COUNT(*) FROM food_items").fetchone()[0]
+            if count > 0:
+                needs_micros = True
+    except Exception:
+        pass
+
+    if needs_micros:
+        load_foods(conn)
         refresh_food_quality(conn)
 
     conn.row_factory = None
@@ -303,26 +438,47 @@ def load_foods(conn) -> int:
     rows = ws.iter_rows(values_only=True)
     header = next(rows)
     col = {name: i for i, name in enumerate(header)}
+    
+    col_names = [
+        "food_code", "food_name", "energy_kcal_100g", "carb_g_100g", "protein_g_100g",
+        "fat_g_100g", "fibre_g_100g", "servings_unit", "unit_serving_energy_kcal",
+        "unit_serving_carb_g", "unit_serving_protein_g", "unit_serving_fat_g",
+        "unit_serving_fibre_g",
+    ] + [dst for _, dst in MICRONUTRIENT_COLS_100G] + [dst for _, dst in MICRONUTRIENT_SERVING_COLS]
+
+    placeholders = ", ".join(["?"] * len(col_names))
+    sql = f"INSERT OR REPLACE INTO food_items ({', '.join(col_names)}) VALUES ({placeholders})"
+
     batch = []
     for row in rows:
         if not row[col["food_name"]]:
             continue
-        batch.append((
-            row[col["food_code"]], row[col["food_name"]], row[col["energy_kcal"]],
-            row[col["carb_g"]], row[col["protein_g"]], row[col["fat_g"]], row[col["fibre_g"]],
-            row[col["servings_unit"]], row[col["unit_serving_energy_kcal"]],
-            row[col["unit_serving_carb_g"]], row[col["unit_serving_protein_g"]],
-            row[col["unit_serving_fat_g"]], row[col["unit_serving_fibre_g"]],
-        ))
-    conn.executemany(
-        """INSERT OR REPLACE INTO food_items
-           (food_code, food_name, energy_kcal_100g, carb_g_100g, protein_g_100g,
-            fat_g_100g, fibre_g_100g, servings_unit, unit_serving_energy_kcal,
-            unit_serving_carb_g, unit_serving_protein_g, unit_serving_fat_g,
-            unit_serving_fibre_g)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        batch,
-    )
+        vals = [
+            row[col["food_code"]],
+            row[col["food_name"]],
+            _safe_float(row[col.get("energy_kcal")]),
+            _safe_float(row[col.get("carb_g")]),
+            _safe_float(row[col.get("protein_g")]),
+            _safe_float(row[col.get("fat_g")]),
+            _safe_float(row[col.get("fibre_g")]),
+            row[col.get("servings_unit")],
+            _safe_float(row[col.get("unit_serving_energy_kcal")]),
+            _safe_float(row[col.get("unit_serving_carb_g")]),
+            _safe_float(row[col.get("unit_serving_protein_g")]),
+            _safe_float(row[col.get("unit_serving_fat_g")]),
+            _safe_float(row[col.get("unit_serving_fibre_g")]),
+        ]
+        for src, _ in MICRONUTRIENT_COLS_100G:
+            idx = col.get(src)
+            vals.append(_safe_float(row[idx]) if idx is not None else None)
+        for src, _ in MICRONUTRIENT_SERVING_COLS:
+            idx = col.get(src)
+            vals.append(_safe_float(row[idx]) if idx is not None else None)
+        batch.append(tuple(vals))
+
+    chunk_size = 100
+    for i in range(0, len(batch), chunk_size):
+        conn.executemany(sql, batch[i : i + chunk_size])
     return len(batch)
 
 

@@ -435,3 +435,27 @@ def test_health_insights_endpoint(test_client):
         assert "math" in data
         assert "bmr" in data["math"]
         assert "rows" in data
+
+
+def test_micronutrients_today_and_date(test_client):
+    # Test /api/micronutrients/today
+    res = test_client.get("/api/micronutrients/today")
+    assert res.status_code == 200
+    data = res.json()
+    assert "nutrients" in data
+    assert "totals" in data
+    assert "rdas" in data
+    assert "sex" in data
+    assert len(data["nutrients"]) >= 15
+
+    # Check structure of a nutrient
+    ca = next((n for n in data["nutrients"] if n["key"] == "calcium_mg"), None)
+    assert ca is not None
+    assert ca["name"] == "Calcium"
+    assert ca["unit"] == "mg"
+    assert ca["rda"] == 1000.0
+
+    # Test /api/micronutrients?date=...
+    res_date = test_client.get(f"/api/micronutrients?date={data['date']}")
+    assert res_date.status_code == 200
+    assert res_date.json()["date"] == data["date"]
