@@ -109,12 +109,22 @@ export default function MealPlansPage() {
           </div>
         )}
 
+        {!notOnboarded && budget && plan?.plan_totals && !empty && !overBudget && budget.remaining_calories > 0 && (() => {
+          const fit = Math.round((plan.plan_totals.calories / budget.remaining_calories) * 100);
+          return (
+            <div className="plan-fit" aria-label={`The full plan covers ${fit}% of your remaining calories`}>
+              <div className="plan-fit-text"><b>Plan fit</b><span>Eating one option from every slot is about {Math.min(fit, 999)}% of what&apos;s left today.</span></div>
+              <div className="progress-track"><span className={`progress-fill ${fit > 105 ? "coral" : "green"}`} style={{ width: `${Math.min(100, fit)}%` }} /></div>
+            </div>
+          );
+        })()}
+
         {loading && !plan && <p className="empty-state">Building your plan…</p>}
 
         {overBudget && <p className="empty-state">You&apos;ve reached today&apos;s calorie target, so there&apos;s nothing more to plan. A fresh plan appears tomorrow.</p>}
 
         {!notOnboarded && !overBudget && plan && empty && !loading && (
-          <p className="empty-state">No foods in the database fit what&apos;s left today. Ask the <Link className="inline-link" href="/chat">coach</Link> for ideas, or log a smaller item.</p>
+          <p className="empty-state">No foods in the database fit what&apos;s left today. Ask the <Link className="inline-link" href="/chat">coach</Link> for ideas, or log a smaller item. You can also <Link className="inline-link" href="/custom-foods">build your own food</Link>.</p>
         )}
 
         {!notOnboarded && !overBudget && plan?.plan && !empty && (
@@ -124,7 +134,7 @@ export default function MealPlansPage() {
               return (
                 <section className="panel plan-slot" key={slot.key}>
                   <div className="panel-head">
-                    <div><h3>{slot.title}</h3><p>{slot.hint}</p></div>
+                    <div><h3>{slot.title}</h3><p>{slot.hint}{options.length > 0 ? ` · ${Math.round(Math.min(...options.map(o => o.calories)))}–${Math.round(Math.max(...options.map(o => o.calories)))} kcal` : ""}</p></div>
                     <span className="plan-slot-icon" aria-hidden="true">{slot.icon}</span>
                   </div>
                   {options.length === 0 && <p className="empty-state">Nothing fits this slot right now.</p>}

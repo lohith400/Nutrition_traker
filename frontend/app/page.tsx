@@ -1,15 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
-import { Activity, AlertCircle, ArrowUpRight, Droplets, Flame, Footprints, Plus, Sparkles, Target, X, Zap } from "lucide-react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { Activity, AlertCircle, ArrowUpRight, ChefHat, Droplets, Flame, Footprints, Plus, Search, Sparkles, Target, Trash2, X, Zap } from "lucide-react";
 import Shell from "./components/Shell";
+import { FoodOption, FoodOptionList } from "./components/FoodOptions";
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 type Profile = { status?: string; name?: string; target_calories?: number; target_protein_g?: number; target_carbs_g?: number; target_fat_g?: number; target_water_l?: number };
 type Pattern = { pattern_type: string; description: string; detected_on: string };
-type Budget = { consumed_calories: number; remaining_calories: number; consumed_protein_g: number; remaining_protein_g: number; consumed_carbs_g: number; remaining_carbs_g: number; target_calories: number; target_protein_g: number; target_carbs_g: number; target_water_l?: number; consumed_water_l?: number; remaining_water_l?: number; patterns?: Pattern[] };
-type Meal = { food_name: string; meal_type: string; log_time?: string; calories: number; protein_g: number };
+type Budget = { target_fat_g?: number; consumed_fat_g?: number; remaining_fat_g?: number; consumed_calories: number; remaining_calories: number; consumed_protein_g: number; remaining_protein_g: number; consumed_carbs_g: number; remaining_carbs_g: number; target_calories: number; target_protein_g: number; target_carbs_g: number; target_water_l?: number; consumed_water_l?: number; remaining_water_l?: number; patterns?: Pattern[] };
+type Meal = { log_id?: number; food_name: string; meal_type: string; log_time?: string; calories: number; protein_g: number };
 type FitnessSummary = { status?: "ok" | "error" | "not_configured"; configured?: boolean; date?: string; steps: number; calories_burned: number; running_minutes: number; error?: string; message?: string };
 
 function timeGreeting(): string {
@@ -28,6 +29,66 @@ function fmt(n: number): string {
 function Stat({ label, value, goal, unit, color, Icon }: { label: string; value: number; goal: number; unit: string; color: string; Icon: typeof Flame }) {
   const percent = goal ? Math.min(100, value / goal * 100) : 0;
   return <div className="stat-card"><div className="stat-topline"><span className={`stat-icon ${color}`}><Icon size={17} /></span>{label}<span className="stat-more">···</span></div><div className="stat-number"><span className="stat-value">{fmt(value)}</span><small>{unit}</small></div><div className="progress-track"><span className={`progress-fill ${color}`} style={{ width: `${percent}%` }} /></div><div className="stat-meta"><span>{Math.round(percent)}% of goal</span><b>{fmt(goal)}{unit}</b></div></div>;
+}
+
+function CalorieRing({ consumed, target, burned }: { consumed: number; target: number; burned: number }) {
+  const r = 70, c = 2 * Math.PI * r;
+  const pct = target ? Math.min(1, consumed / target) : 0;
+  const over = target > 0 && consumed > target;
+  const remaining = Math.round(target - consumed);
+  return (
+    <div className="ring-wrap">
+      <svg viewBox="0 0 180 180" className="ring" role="img" aria-label={`${Math.round(consumed)} of ${Math.round(target)} calories eaten`}>
+        <circle cx="90" cy="90" r={r} fill="none" stroke="#efeae0" strokeWidth="16" />
+        <circle cx="90" cy="90" r={r} fill="none" stroke={over ? "var(--coral)" : "var(--green-dark)"} strokeWidth="16" strokeLinecap="round" strokeDasharray={`${pct * c} ${c}`} transform="rotate(-90 90 90)" style={{ transition: "stroke-dasharray .8s cubic-bezier(.2,.8,.2,1)" }} />
+      </svg>
+      <div className="ring-center">
+        <b>{target ? Math.abs(remaining) : Math.round(consumed)}</b>
+        <small>{target ? (over ? "kcal over" : "kcal left") : "kcal eaten"}</small>
+        {burned > 0 && <em><Flame size={11} /> {Math.round(burned)} burned</em>}
+      </div>
+    </div>
+  );
+}
+
+function MacroBar({ label, value, goal, color }: { label: string; value: number; goal: number; color: string }) {
+  const pct = goal ? Math.min(100, (value / goal) * 100) : 0;
+  return (
+    <div className="mbar">
+      <div className="mbar-top"><span>{label}</span><b>{Math.round(value)}<small> / {Math.round(goal)} g</small></b></div>
+      <div className="progress-track"><span className={`progress-fill ${color}`} style={{ width: `${pct}%` }} /></div>
+    </div>
+  );
+}
+
+function QuickAdd({ onLogged }: { onLogged: () => void }) {
+  const [q, setQ] = useState("");
+  const [options, setOptions] = useState<FoodOption[] | null>(null);
+  const [hidden, setHidden] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const seq = useRef(0);
+  useEffect(() => {
+    const text = q.trim();
+    if (text.length < 2) { setOptions(null); return; }
+    const mine = ++seq.current;
+    setLoading(true);
+    const t = setTimeout(() => {
+      fetch(`${API}/api/food-options?q=${encodeURIComponent(text)}&limit=6`)
+        .then(r => r.json())
+        .then(d => { if (mine === seq.current) { setOptions(d.options || []); setHidden(d.hidden_by_diet || 0); } })
+        .catch(() => { if (mine === seq.current) setOptions([]); })
+        .finally(() => { if (mine === seq.current) setLoading(false); });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q]);
+  return (
+    <div className="quick-add">
+      <label className="search-box"><Search size={16} /><input id="food-entry" value={q} onChange={e => setQ(e.target.value)} placeholder="Search a food: idli, masala chai, egg, banana…" aria-label="Search foods to log" /></label>
+      {loading && !options && <p className="empty-state small">Searching…</p>}
+      {options && options.length === 0 && !loading && <p className="empty-state small">Nothing related to “{q}”. <Link className="inline-link" href="/custom-foods"><ChefHat size={12} /> Build it from ingredients</Link></p>}
+      {options && options.length > 0 && <FoodOptionList key={q} options={options} hiddenByDiet={hidden} onLogged={() => { onLogged(); }} />}
+    </div>
+  );
 }
 
 export default function Page() {
@@ -71,6 +132,14 @@ export default function Page() {
     event.preventDefault(); if (!food.trim()) return; setLoading(true);
     try { const response = await fetch(`${API}/api/log-food`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ item_name: food, quantity: 1, unit: "serving", meal_type: "snack" }) }); const data = await response.json(); if (!response.ok) throw new Error(data.detail); setNotice(`Logged ${data.matched_to}: ${data.calories} kcal, ${data.protein_g}g protein.`); setFood(""); await refresh(); } catch (error) { setNotice(error instanceof Error ? error.message : "Could not log this food. Try the Coach chat for foods that need a gram amount instead of a serving."); } finally { setLoading(false); }
   }
+  async function removeMeal(id: number) {
+    try {
+      const response = await fetch(`${API}/api/log/${id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Could not remove that entry.");
+      setNotice("Removed from today's log.");
+      await refresh();
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not remove that entry."); }
+  }
   async function askCoach(event: FormEvent) { event.preventDefault(); if (!chat.trim()) return; setLoading(true); try { const response = await fetch(`${API}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: chat }) }); const data = await response.json(); setReply(data.reply || data.detail); setChat(""); } catch { setReply("The coach is unavailable. Check your API key and backend."); } finally { setLoading(false); } }
 
   async function quickLogWater(amountL: number, label: string) {
@@ -93,7 +162,7 @@ export default function Page() {
   }
 
   const name = profile?.name || "there"; const calories = budget?.consumed_calories || 0; const protein = budget?.consumed_protein_g || 0; const carbs = budget?.consumed_carbs_g || 0; const water = budget?.consumed_water_l || 0; const greeting = timeGreeting();
-  return <Shell active="overview" crumb="Overview"><div className="page-wrap"><div className="hero-row"><div><p className="eyebrow">YOUR DAILY RHYTHM</p><h1>{greeting}, {name} <span>✦</span></h1><p className="subtitle">Small choices today become a healthier you tomorrow.</p></div><button className="primary-btn" onClick={() => document.getElementById("food-entry")?.focus()}><Plus size={18} /> Log food</button></div>{notice && <div className="notice-banner"><Sparkles size={16} />{notice}<button onClick={() => setNotice("")}><X size={15} /></button></div>}<div className="insight-banner"><div className="insight-icon"><Sparkles size={19} /></div><div><b>{budget ? "Your nutrition is in motion" : "Connect your nutrition profile"}</b><p>{budget ? `${budget.remaining_protein_g}g of protein remains in your target today.` : "Complete onboarding to calculate your personal targets."}</p></div>{!profile || profile.status === "not_onboarded" ? <button className="link-btn" onClick={() => setShowOnboarding(true)}>Set up profile <ArrowUpRight size={15} /></button> : null}</div>{budget?.patterns && budget.patterns.length > 0 && <div className="notice-banner pattern-banner"><Sparkles size={16} />{budget.patterns[0].description}</div>}<div className="section-header"><div><h2>Today&apos;s overview</h2><p>Live data from your NutriSync food log.</p></div></div><div className="stats-grid"><Stat label="Calories" value={calories} goal={budget?.target_calories || 0} unit=" kcal" color="coral" Icon={Flame} /><Stat label="Protein" value={protein} goal={budget?.target_protein_g || 0} unit="g" color="blue" Icon={Target} /><Stat label="Carbs" value={carbs} goal={budget?.target_carbs_g || 0} unit="g" color="yellow" Icon={Zap} /><Stat label="Water" value={water} goal={budget?.target_water_l || 6.5} unit=" L" color="cyan" Icon={Droplets} /></div><div className="water-quick-bar"><span className="water-quick-label"><Droplets size={14} /> Quick log water:</span><button type="button" className="water-btn" onClick={() => quickLogWater(0.15, "+150 ml")} disabled={loading}>+150 ml</button><button type="button" className="water-btn" onClick={() => quickLogWater(0.25, "+250 ml")} disabled={loading}>+250 ml</button><button type="button" className="water-btn" onClick={() => quickLogWater(0.5, "+500 ml")} disabled={loading}>+500 ml</button><button type="button" className="water-btn" onClick={() => quickLogWater(1.0, "+1 L")} disabled={loading}>+1 L</button></div><div className="section-header" style={{ marginTop: "32px" }}><div><h2>Activity &amp; Movement</h2><p>Live physical activity synced from Google Fit.</p></div><div>{fitness?.status === "ok" ? <span className="fit-header-badge ok"><span className="fit-badge-dot" /> Google Fit Synced</span> : fitness?.configured ? <span className="fit-header-badge warning" title={fitness?.error || "Google Fit credentials pending"}><span className="fit-badge-dot" /> Google Fit Connected</span> : <span className="fit-header-badge neutral"><span className="fit-badge-dot" /> Google Fit Setup</span>}</div></div><div className="stats-grid"><Stat label="Daily Steps" value={fitness?.steps || 0} goal={10000} unit=" steps" color="emerald" Icon={Footprints} /><Stat label="Burned Calories" value={fitness?.calories_burned || 0} goal={2000} unit=" kcal" color="orange" Icon={Flame} /><Stat label="Running / Active" value={fitness?.running_minutes || 0} goal={30} unit=" min" color="purple" Icon={Activity} /></div>{fitness?.status === "error" && <div className="fit-helper-banner"><AlertCircle size={17} style={{ flexShrink: 0, marginTop: "2px" }} /><div><b>Google Fit Sync Status:</b> {fitness.error || "Token authorization issue."}<div style={{ marginTop: "4px", fontSize: "11px", opacity: 0.9 }}>If you generated this in Google OAuth Playground, ensure <code>Use your own OAuth credentials</code> was checked with your Client ID and Client Secret in Playground Settings (⚙).</div></div></div>}<div className="content-grid"><section className="panel"><div className="panel-head"><div><h3>Recent meals</h3><p>Your food log for today</p></div></div><div className="meal-list">{meals.length ? meals.map((meal, index) => <div className="meal-row" key={`${meal.food_name}-${index}`}><div className="meal-icon mint">🥗</div><div className="meal-info"><b>{meal.food_name}</b><span>{meal.meal_type} · {meal.log_time || "today"}</span></div><div className="macro-box"><b>{meal.calories}</b><span>kcal</span></div><div className="macro-box protein-box"><b>{meal.protein_g}g</b><span>protein</span></div></div>) : <p className="empty-state">No meals logged yet. Start with the box below.</p>}</div><form className="inline-log" onSubmit={logFood}><input id="food-entry" value={food} onChange={event => setFood(event.target.value)} placeholder="e.g. 2 idli, chai, paneer tikka..." /><button className="primary-btn" disabled={loading}><Plus size={16} /> {loading ? "Logging" : "Add meal"}</button></form></section><aside className="panel coach-panel"><div className="coach-badge"><Sparkles size={20} /></div><p className="eyebrow">NUTRISYNC COACH</p><h3>A little nudge for you</h3><p>{reply || "Ask me about your meals, targets, or what to eat next. I use your real nutrition data."}</p><form className="coach-form" onSubmit={askCoach}><input value={chat} onChange={event => setChat(event.target.value)} placeholder="Ask your coach..." /><button aria-label="Send question"><ArrowUpRight size={16} /></button></form><Link className="link-btn coach-full-link" href="/chat">Open full chat <ArrowUpRight size={13} /></Link></aside></div></div>{showOnboarding && <Onboarding onDone={() => { setShowOnboarding(false); refresh(); }} />}</Shell>;
+  return <Shell active="overview" crumb="Overview"><div className="page-wrap"><div className="hero-row"><div><p className="eyebrow">YOUR DAILY RHYTHM</p><h1>{greeting}, {name} <span>✦</span></h1><p className="subtitle">Small choices today become a healthier you tomorrow.</p></div><button className="primary-btn" onClick={() => document.getElementById("food-entry")?.focus()}><Plus size={18} /> Log food</button></div>{notice && <div className="notice-banner"><Sparkles size={16} />{notice}<button onClick={() => setNotice("")}><X size={15} /></button></div>}<div className="insight-banner"><div className="insight-icon"><Sparkles size={19} /></div><div><b>{budget ? "Your nutrition is in motion" : "Connect your nutrition profile"}</b><p>{budget ? `${budget.remaining_protein_g}g of protein remains in your target today.` : "Complete onboarding to calculate your personal targets."}</p></div>{!profile || profile.status === "not_onboarded" ? <button className="link-btn" onClick={() => setShowOnboarding(true)}>Set up profile <ArrowUpRight size={15} /></button> : null}</div>{budget?.patterns && budget.patterns.length > 0 && <div className="notice-banner pattern-banner"><Sparkles size={16} />{budget.patterns[0].description}</div>}{budget && !!budget.target_calories && <section className="panel glance"><CalorieRing consumed={calories} target={budget.target_calories} burned={fitness?.calories_burned || 0} /><div className="glance-bars"><div className="glance-title"><h3>Today at a glance</h3><p>{calories > budget.target_calories ? "You're past your calorie target. Keep the rest of the day light and protein-forward." : `${Math.round(budget.remaining_calories)} kcal and ${Math.round(budget.remaining_protein_g)} g protein still to go.`}</p></div><MacroBar label="Protein" value={protein} goal={budget.target_protein_g} color="blue" /><MacroBar label="Carbs" value={carbs} goal={budget.target_carbs_g} color="yellow" />{!!budget.target_fat_g && <MacroBar label="Fat" value={budget.consumed_fat_g || 0} goal={budget.target_fat_g} color="coral" />}</div></section>}<div className="section-header"><div><h2>Today&apos;s overview</h2><p>Live data from your NutriSync food log.</p></div></div><div className="stats-grid"><Stat label="Calories" value={calories} goal={budget?.target_calories || 0} unit=" kcal" color="coral" Icon={Flame} /><Stat label="Protein" value={protein} goal={budget?.target_protein_g || 0} unit="g" color="blue" Icon={Target} /><Stat label="Carbs" value={carbs} goal={budget?.target_carbs_g || 0} unit="g" color="yellow" Icon={Zap} /><Stat label="Water" value={water} goal={budget?.target_water_l || 6.5} unit=" L" color="cyan" Icon={Droplets} /></div><div className="water-quick-bar"><span className="water-quick-label"><Droplets size={14} /> Quick log water:</span><button type="button" className="water-btn" onClick={() => quickLogWater(0.15, "+150 ml")} disabled={loading}>+150 ml</button><button type="button" className="water-btn" onClick={() => quickLogWater(0.25, "+250 ml")} disabled={loading}>+250 ml</button><button type="button" className="water-btn" onClick={() => quickLogWater(0.5, "+500 ml")} disabled={loading}>+500 ml</button><button type="button" className="water-btn" onClick={() => quickLogWater(1.0, "+1 L")} disabled={loading}>+1 L</button></div><div className="section-header" style={{ marginTop: "32px" }}><div><h2>Activity &amp; Movement</h2><p>Live physical activity synced from Google Fit.</p></div><div>{fitness?.status === "ok" ? <span className="fit-header-badge ok"><span className="fit-badge-dot" /> Google Fit Synced</span> : fitness?.configured ? <span className="fit-header-badge warning" title={fitness?.error || "Google Fit credentials pending"}><span className="fit-badge-dot" /> Google Fit Connected</span> : <span className="fit-header-badge neutral"><span className="fit-badge-dot" /> Google Fit Setup</span>}</div></div><div className="stats-grid"><Stat label="Daily Steps" value={fitness?.steps || 0} goal={10000} unit=" steps" color="emerald" Icon={Footprints} /><Stat label="Burned Calories" value={fitness?.calories_burned || 0} goal={2000} unit=" kcal" color="orange" Icon={Flame} /><Stat label="Running / Active" value={fitness?.running_minutes || 0} goal={30} unit=" min" color="purple" Icon={Activity} /></div>{fitness?.status === "error" && <div className="fit-helper-banner"><AlertCircle size={17} style={{ flexShrink: 0, marginTop: "2px" }} /><div><b>Google Fit Sync Status:</b> {fitness.error || "Token authorization issue."}<div style={{ marginTop: "4px", fontSize: "11px", opacity: 0.9 }}>If you generated this in Google OAuth Playground, ensure <code>Use your own OAuth credentials</code> was checked with your Client ID and Client Secret in Playground Settings (⚙).</div></div></div>}<div className="content-grid"><section className="panel"><div className="panel-head"><div><h3>Recent meals</h3><p>Your food log for today</p></div></div><div className="meal-list">{meals.length ? meals.map((meal, index) => <div className="meal-row" key={`${meal.food_name}-${index}`}><div className="meal-icon mint">🥗</div><div className="meal-info"><b>{meal.food_name}</b><span>{meal.meal_type} · {meal.log_time ? meal.log_time.slice(11, 16) || meal.log_time : "today"}</span></div><div className="macro-box"><b>{meal.calories}</b><span>kcal</span></div><div className="macro-box protein-box"><b>{meal.protein_g}g</b><span>protein</span></div>{meal.log_id != null && <button type="button" className="icon-mini" aria-label={`Remove ${meal.food_name}`} onClick={() => removeMeal(meal.log_id!)}><Trash2 size={14} /></button>}</div>) : <p className="empty-state">No meals logged yet. Search a food below.</p>}</div><QuickAdd onLogged={() => { refresh().catch(() => {}); }} /></section><aside className="panel coach-panel"><div className="coach-badge"><Sparkles size={20} /></div><p className="eyebrow">NUTRISYNC COACH</p><h3>A little nudge for you</h3><p>{reply || "Ask me about your meals, targets, or what to eat next. I use your real nutrition data."}</p><form className="coach-form" onSubmit={askCoach}><input value={chat} onChange={event => setChat(event.target.value)} placeholder="Ask your coach..." /><button aria-label="Send question"><ArrowUpRight size={16} /></button></form><Link className="link-btn coach-full-link" href="/chat">Open full chat <ArrowUpRight size={13} /></Link></aside></div></div>{showOnboarding && <Onboarding onDone={() => { setShowOnboarding(false); refresh(); }} />}</Shell>;
 }
 
 function Onboarding({ onDone }: { onDone: () => void }) {

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, Sparkles, TrendingUp } from "lucide-react";
 import Shell, { API } from "../components/Shell";
+import { Consistency, WeightTracker } from "./parts";
 
 type DayEntry = { date: string; meals: unknown[]; total_calories: number; total_protein_g: number; total_carbs_g: number; total_fat_g: number };
 type Profile = {
@@ -157,6 +158,8 @@ export default function ProgressPage() {
           )}
         </section>
 
+        <Consistency calorieTarget={calorieTarget} proteinTarget={proteinTarget} />
+
         <div className="content-grid progress-grid">
           <section className="panel">
             <div className="panel-head"><div><h3>Weight goal</h3><p>{goalLabel(profile?.goal)}</p></div></div>
@@ -168,7 +171,7 @@ export default function ProgressPage() {
                   <div><span>Goal</span><b>{goalWeight}<small> kg</small></b></div>
                 </div>
                 <p className="weight-note">{diff === 0 ? "You're at your goal weight." : diff < 0 ? `${Math.abs(diff)} kg to lose to reach your goal.` : `${diff} kg to gain to reach your goal.`}</p>
-                <p className="weight-note muted">Weight isn&apos;t tracked over time yet. Update your current weight on your <Link className="inline-link" href="/profile">profile</Link> and your targets will recalculate.</p>
+                <p className="weight-note muted">Updating your weight on your <Link className="inline-link" href="/profile">profile</Link> recalculates your targets.</p>
               </>
             ) : <p className="empty-state">Add your weights on your profile to see your goal here.</p>}
           </section>
@@ -187,6 +190,11 @@ export default function ProgressPage() {
             )}
           </section>
         </div>
+
+        <section className="panel wt-panel">
+          <div className="panel-head"><div><h3>Weight over time</h3><p>Log a reading whenever you weigh yourself. Your trend and estimated goal date update automatically.</p></div></div>
+          <WeightTracker goalWeight={goalWeight} startWeight={undefined} />
+        </section>
 
         {patterns.length > 0 && (
           <section className="panel patterns-panel">

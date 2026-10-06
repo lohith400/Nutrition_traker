@@ -2,10 +2,15 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { MessageCircle, Plus, ShoppingCart, Sparkles, Trash2 } from "lucide-react";
+import { Flame, MessageCircle, Plus, ShoppingCart, Sparkles, Target, Trash2 } from "lucide-react";
 import Shell, { API } from "../components/Shell";
 
 type Item = { id: number; name: string; quantity: number; unit: string };
+type Nutri = { calories: number; protein_g: number; carbs_g: number; fat_g: number };
+type NutriRow = { id: number; matched_to: string | null; source: string | null; nutrition: Nutri | null; grams: number | null };
+type Pantry = { items: NutriRow[]; totals: Nutri; counted: number; total_items: number };
+
+const STAPLES: [string, number, string][] = [["Rice", 1, "kg"], ["Atta", 1, "kg"], ["Toor dal", 500, "g"], ["Milk", 1, "l"], ["Egg", 12, "pcs"], ["Paneer", 200, "g"], ["Onion", 1, "kg"], ["Tomato", 500, "g"], ["Potato", 1, "kg"], ["Oil", 1, "l"], ["Curd", 500, "g"], ["Banana", 6, "pcs"]];
 
 const DEFAULT_UNITS = ["kg", "g", "l", "ml", "pcs", "pack", "dozen", "bunch"];
 
@@ -23,6 +28,12 @@ export default function GroceryPage() {
   const [unit, setUnit] = useState("kg");
   const [adding, setAdding] = useState(false);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [pantry, setPantry] = useState<Pantry | null>(null);
+  const [profile, setProfile] = useState<{ target_calories?: number; target_protein_g?: number } | null>(null);
+
+  const loadPantry = useCallback(() => {
+    fetch(`${API}/api/grocery/nutrition`, { cache: "no-store" }).then(r => r.json()).then(setPantry).catch(() => {});
+  }, []);
 
   const load = useCallback(() => {
     fetch(`${API}/api/grocery`, { cache: "no-store" })
@@ -31,10 +42,13 @@ export default function GroceryPage() {
         setItems(data.items || []);
         if (data.units) setUnits(data.units);
         setError("");
+        loadPantry();
       })
       .catch(() => setError("Backend unavailable. Start FastAPI on port 8000."))
       .finally(() => setLoading(false));
-  }, []);
+  }, [loadPantry]);
+
+  useEffect(() => { fetch(`${API}/api/profile`).then(r => r.json()).then(setProfile).catch(() => {}); }, []);
 
   useEffect(() => {
     load();
@@ -53,7 +67,7 @@ export default function GroceryPage() {
       const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json" } });
       const data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Something went wrong.");
-      if (data.items) setItems(data.items);
+      if (data.items) { setItems(data.items); loadPantry(); }
       setError("");
       return true;
     } catch (err) {
@@ -113,6 +127,26 @@ export default function GroceryPage() {
           <button className="primary-btn" type="submit" disabled={adding}><Plus size={16} /> {adding ? "Adding" : "Add"}</button>
         </form>
 
+        <div className="staple-chips" aria-label="Quick add common items">
+          <small>Quick add:</small>
+          {STAPLES.map(([n, q, u]) => (
+            <button key={n} type="button" className="chip" onClick={() => { setName(n); setQuantity(String(q)); setUnit(units.includes(u) ? u : units[0]); document.querySelector<HTMLInputElement>(".grocery-add input")?.focus(); }}>{n}</button>
+          ))}
+        </div>
+
+        {pantry && pantry.counted > 0 && (
+          <section className="panel pantry-card">
+            <div className="panel-head"><div><h3>What your pantry holds</h3><p>Nutrition of the {pantry.counted} item{pantry.counted === 1 ? "" : "s"} measured by weight or volume, using raw values for staples.</p></div></div>
+            <div className="pantry-stats">
+              <div><Flame size={16} /><b>{pantry.totals.calories.toLocaleString()}</b><small>kcal in stock</small></div>
+              <div><Target size={16} /><b>{pantry.totals.protein_g.toLocaleString()} g</b><small>protein in stock</small></div>
+              {profile?.target_calories ? <div><ShoppingCart size={16} /><b>{(pantry.totals.calories / profile.target_calories).toFixed(1)}</b><small>days of your calorie target</small></div> : null}
+              {profile?.target_protein_g ? <div><Target size={16} /><b>{(pantry.totals.protein_g / profile.target_protein_g).toFixed(1)}</b><small>days of your protein target</small></div> : null}
+            </div>
+            {pantry.counted < pantry.total_items && <p className="pantry-note">{pantry.total_items - pantry.counted} item{pantry.total_items - pantry.counted === 1 ? "" : "s"} couldn&apos;t be counted (no nutrition match or no weight, e.g. “pack”).</p>}
+          </section>
+        )}
+
         <section className="panel grocery-list">
           <div className="panel-head">
             <div><h3>At home</h3><p>{items.length} {items.length === 1 ? "item" : "items"}. Change a quantity and click away to save it.</p></div>
@@ -126,7 +160,7 @@ export default function GroceryPage() {
 
           {items.map(item => (
             <div className="grocery-row" key={item.id}>
-              <b className="grocery-name">{item.name}</b>
+              <b className="grocery-name">{item.name}{(() => { const n = pantry?.items.find(r => r.id === item.id)?.nutrition; return n ? <em className="grocery-nutri" title="Whole quantity at home">{Math.round(n.calories).toLocaleString()} kcal · {Math.round(n.protein_g)} g protein</em> : null; })()}</b>
               <input
                 className="grocery-qty"
                 type="number"

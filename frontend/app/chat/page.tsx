@@ -1,9 +1,10 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { AlarmClock, AlertTriangle, Camera, CheckCircle2, Droplets, ExternalLink, MapPin, Mic, Plus, Search, Send, ShoppingCart, Sparkles, Square, Star, Trash2, Volume2, VolumeX, X } from "lucide-react";
+import { AlarmClock, AlertTriangle, BookmarkPlus, Camera, CheckCircle2, ChefHat, Droplets, ExternalLink, MapPin, Mic, Plus, Search, Send, ShoppingCart, Sparkles, Square, Star, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import Shell, { API } from "../components/Shell";
 import { useVoiceChat } from "../hooks/useVoiceChat";
+import { FoodOption, FoodOptionList, MacroChips } from "../components/FoodOptions";
 
 type ToolEvent = { tool: string; args: Record<string, unknown>; result: Record<string, unknown> };
 type ChatMsg = { role: "user" | "assistant"; content: string; tool_events?: ToolEvent[]; created_at?: string; pending?: boolean; image?: string };
@@ -100,8 +101,65 @@ function RestaurantCard({ r }: { r: Restaurant }) {
 type GroceryLine = { name: string; added?: string; removed?: string; now_have?: string };
 type MealLine = { name: string; grams: number; matched_to?: string; calories: number; protein_g: number; carbs_g: number; fat_g: number };
 
-function ToolCard({ event }: { event: ToolEvent }) {
+type RecipeLine = { name: string; matched_to?: string | null; source?: string | null; grams?: number | null; grams_estimated?: boolean; status: string; nutrition?: { calories: number; protein_g: number } | null; note?: string | null };
+
+function RecipeCard({ result }: { result: Record<string, unknown> }) {
+  const lines = (result.ingredients || []) as RecipeLine[];
+  const per = result.per_serving as { calories: number; protein_g: number; carbs_g: number; fat_g: number };
+  const tot = result.totals as typeof per;
+  const servings = Number(result.servings) || 1;
+  const warnings = (result.warnings || []) as string[];
+  const [saved, setSaved] = useState<string>("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true); setErr("");
+    try {
+      // Re-run the analysis to get per-100g values for each line, then save the matched lines.
+      const ings = (result.ingredients as Array<Record<string, unknown>>).map(l => ({
+        name: l.name, quantity: l.quantity, unit: l.unit, grams: l.grams, food_code: l.food_code || undefined,
+        per_100g: l.source === "ai_estimate" ? l.per_100g : undefined,
+      }));
+      const a = await (await fetch(`${API}/api/custom-foods/analyze`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: result.name, servings, ingredients: ings, use_ai: false }) })).json();
+      const good = (a.ingredients || []).filter((l: RecipeLine) => l.status !== "needs_input");
+      const res = await fetch(`${API}/api/custom-foods`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: result.name, servings, serving_label: "serving", ingredients: good }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Could not save.");
+      setSaved(data.food.name);
+    } catch (e) { setErr(e instanceof Error ? e.message : "Could not save."); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="tool-card recipe-card">
+      <div className="recipe-title"><ChefHat size={15} /> <b>{String(result.name)}</b> <span>{servings === 1 ? "1 serving" : `${servings} servings`}</span></div>
+      <ul className="recipe-lines">
+        {lines.map((l, i) => (
+          <li key={i} className={l.status === "needs_input" ? "miss" : ""}>
+            <span><b>{l.name}</b>{l.grams ? ` · ${l.grams_estimated ? "≈" : ""}${l.grams} g` : ""}</span>
+            <em>{l.nutrition ? `${Math.round(l.nutrition.calories)} kcal · ${l.nutrition.protein_g} g P` : "not counted"}</em>
+          </li>
+        ))}
+      </ul>
+      <div className="recipe-per"><small>Per serving</small><MacroChips n={per} big /></div>
+      {servings !== 1 && <div className="recipe-per"><small>Whole recipe</small><MacroChips n={tot} /></div>}
+      {warnings.map((w, i) => <div className="tool-card-note" key={i}>{w}</div>)}
+      {typeof result.coach_note === "string" && <p className="recipe-coach">{result.coach_note}</p>}
+      {saved
+        ? <div className="fo-done"><CheckCircle2 size={14} /> Saved as <b>{saved}</b>. You can log it by name now, or manage it on the Custom foods page.</div>
+        : <button type="button" className="ghost-btn recipe-save" disabled={busy || lines.every(l => l.status === "needs_input")} onClick={save}><BookmarkPlus size={14} /> {busy ? "Saving…" : "Save as custom food"}</button>}
+      {err && <p className="fo-error">{err}</p>}
+    </div>
+  );
+}
+
+function ToolCard({ event, onLogged }: { event: ToolEvent; onLogged?: () => void }) {
   const { tool, result } = event;
+  if (tool === "analyze_recipe") {
+    if (result.status !== "ok") return <div className="tool-card tool-card-warn"><AlertTriangle size={14} /> Couldn&apos;t work that out: {String(result.error || "unknown error")}</div>;
+    return <RecipeCard result={result} />;
+  }
   if (tool === "set_reminder") {
     if (result.status !== "created") {
       return <div className="tool-card tool-card-warn"><AlertTriangle size={14} /> Reminder not set — {String(result.error || "unknown error")}</div>;
@@ -155,9 +213,31 @@ function ToolCard({ event }: { event: ToolEvent }) {
     return <div className="tool-card tool-card-warn"><AlertTriangle size={14} /> {String(result.error || result.message || "Restaurant search failed.")}</div>;
   }
   if (tool === "lookup_food") {
-    if (result.status === "not_found") {
-      return <div className="tool-card tool-card-warn"><Search size={14} /> Couldn&apos;t find &quot;{String(result.item)}&quot; in the food database.</div>;
+    const qtyDefault = Number(result.quantity) > 0 ? Number(result.quantity) : 1;
+    const unitDefault = result.unit === "grams" ? "grams" : "serving";
+    if (result.status === "options" && Array.isArray(result.options)) {
+      return (
+        <div className="tool-card fo-card">
+          <FoodOptionList
+            options={result.options as FoodOption[]}
+            title={`Related foods found in the dataset for "${String(result.query)}". Which one did you have?`}
+            hiddenByDiet={Number(result.hidden_by_diet) || 0}
+            defaultQty={qtyDefault} defaultUnit={unitDefault as "serving" | "grams"} fromChat onLogged={() => onLogged?.()}
+          />
+        </div>
+      );
     }
+    if (result.status === "not_found" || result.status === "diet_mismatch") {
+      return <div className="tool-card tool-card-warn"><Search size={14} /> {result.status === "diet_mismatch" ? `Foods matching "${String(result.query)}" don't fit your diet.` : `Nothing related to "${String(result.query || result.item)}" in the dataset. Describe it by its ingredients and I can work it out.`}</div>;
+    }
+    if (result.status === "found_needs_grams" && result.selected) {
+      return (
+        <div className="tool-card fo-card">
+          <FoodOptionList options={[result.selected as FoodOption]} title="Exact match. This one has no standard serving, so log it by weight." defaultUnit="grams" defaultQty={100} fromChat onLogged={() => onLogged?.()} />
+        </div>
+      );
+    }
+    const related = Array.isArray(result.related) ? (result.related as FoodOption[]) : [];
     return (
       <div className="tool-card tool-card-found">
         <div className="tool-card-head">
@@ -175,6 +255,12 @@ function ToolCard({ event }: { event: ToolEvent }) {
           <span><b>{String(result.fat_g)}g</b> fat</span>
         </div>
         {typeof result.data_quality_warning === "string" && <div className="tool-card-note">{result.data_quality_warning}</div>}
+        {related.length > 0 && (
+          <details className="fo-more">
+            <summary>Not this one? {related.length} related food{related.length === 1 ? "" : "s"}</summary>
+            <FoodOptionList options={related} defaultQty={qtyDefault} defaultUnit={unitDefault as "serving" | "grams"} fromChat onLogged={() => onLogged?.()} />
+          </details>
+        )}
       </div>
     );
   }
@@ -403,7 +489,7 @@ export default function ChatPage() {
                   </div>
                   {message.tool_events && message.tool_events.length > 0 && (
                     <div className="tool-card-stack">
-                      {message.tool_events.map((event, eventIndex) => <ToolCard event={event} key={eventIndex} />)}
+                      {message.tool_events.map((event, eventIndex) => <ToolCard event={event} key={eventIndex} onLogged={() => { loadDay(selectedDate); loadDays(); }} />)}
                     </div>
                   )}
                 </div>

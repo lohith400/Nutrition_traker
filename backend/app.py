@@ -30,9 +30,9 @@ for p in (DIR, ROOT):
         sys.path.insert(0, str(p))
 
 try:
-    from backend import db_setup, energy_insights, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
+    from backend import custom_foods, db_setup, energy_insights, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
 except ImportError:
-    import db_setup, energy_insights, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
+    import custom_foods, db_setup, energy_insights, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -55,7 +55,7 @@ async def lifespan(_app):
         reminders.stop_scheduler()
 
 
-app = FastAPI(title="NutriSync API", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="NutriSync API", version="0.5.0", lifespan=lifespan)
 
 # --- Optional access key -------------------------------------------------------------
 # A free public deployment has a public URL. Set ACCESS_KEY on the server and only
@@ -154,6 +154,10 @@ def save_onboarding(payload: OnboardingRequest):
             targets["target_water_l"] = float(existing["target_water_l"])
     profile = {**data, "bmr_kcal": bmr, "tdee_kcal": tdee, "onboarded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **targets}
     memory_agent.save_user_profile(profile)
+    try:  # every profile save with a weight is also a weight reading for the Progress chart
+        memory_agent.log_weight(float(data["current_weight_kg"]))
+    except Exception:
+        pass
     return {"status": "onboarded", **profile}
 
 
@@ -296,7 +300,17 @@ def food_search(q: str, limit: int = 8):
     """Look up candidate foods for a disambiguation UI (e.g. an autocomplete
     box), filtered to the user's diet and data quality."""
     diet = memory_agent.get_user_diet()
-    return {"results": rag_resolver.search_foods(q, diet=diet, limit=limit)}
+    return {"results": rag_resolver.find_candidates(q, diet=diet, limit=min(max(limit, 1), 30))}
+
+
+@app.get("/api/food-options")
+def food_options(q: str, limit: int = 8):
+    """Related foods for a typed name, each with per-serving and per-100g nutrition, so the user can choose
+    which one they mean before anything is logged (dataset, built-in reference staples and own custom foods)."""
+    diet = memory_agent.get_user_diet()
+    options = rag_resolver.find_candidates(q, diet=diet, limit=min(max(limit, 1), 30))
+    return {"query": q, "options": options, "exact_count": sum(1 for o in options if o.get("exact")),
+            "hidden_by_diet": rag_resolver.count_hidden_by_diet(q, diet), "diet": diet}
 
 
 @app.post("/api/log-food")
@@ -429,3 +443,175 @@ def chat(payload: ChatRequest):
         raise HTTPException(status_code=502, detail=f"Coach provider error: {exc}") from exc
     memory_agent.save_chat_message("assistant", result["reply"], result.get("tool_events"))
     return {"reply": result["reply"], "tool_events": result.get("tool_events", []), "overview": get_overview(), "recent_meals": memory_agent.get_todays_logs()}
+
+
+# ---------------------------------------------------------------------------
+# Logging by exact food (the user picked it from the options), editing, deleting
+# ---------------------------------------------------------------------------
+class FoodCodeLogRequest(BaseModel):
+    food_code: str = Field(min_length=1, max_length=80)
+    quantity: float = Field(default=1.0, gt=0, le=2000)
+    unit: Literal["serving", "grams"] = "serving"
+    meal_type: Literal["breakfast", "lunch", "dinner", "snack"] = "snack"
+    date: str | None = None          # YYYY-MM-DD, for logging something you forgot earlier
+    from_chat: bool = False          # also leave a note in today's coach conversation
+
+
+def _valid_log_date(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        day = datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Date must look like 2026-10-05.")
+    today = datetime.now().date()
+    if day > today:
+        raise HTTPException(status_code=422, detail="You can't log food for a future day.")
+    if (today - day).days > 400:
+        raise HTTPException(status_code=422, detail="That date is too far back.")
+    return day.strftime("%Y-%m-%d")
+
+
+@app.post("/api/log-food-code")
+def log_food_code(payload: FoodCodeLogRequest):
+    log_date = _valid_log_date(payload.date)
+    macros = math_engine.calculate_meal_macros(payload.food_code, payload.quantity, payload.unit)
+    if "error" in macros:
+        raise HTTPException(status_code=422, detail=macros["error"])
+    saved = memory_agent.log_meal(payload.meal_type, payload.food_code, macros["food_name"], payload.quantity,
+                                  macros["calories"], macros["protein_g"], macros["carbs_g"], macros["fat_g"],
+                                  unit=macros["unit"], serving_label=macros.get("serving_label"), log_date=log_date)
+    memory_agent.maybe_detect_patterns(force=True)
+    amount = f"{payload.quantity:g} g" if payload.unit == "grams" else f"{payload.quantity:g} x {macros.get('serving_label') or 'serving'}"
+    result = {"status": "logged", "log_id": saved.get("log_id"), "date": saved.get("date"), "matched_to": macros["food_name"],
+              "meal_type": payload.meal_type, "amount": amount, **macros}
+    if payload.from_chat and not log_date:
+        memory_agent.save_chat_message("user", f"I had {amount} of {macros['food_name']} ({payload.meal_type}).")
+        memory_agent.save_chat_message(
+            "assistant",
+            f"Logged {macros['food_name']} ({amount}) as {payload.meal_type}: {macros['calories']} kcal, {macros['protein_g']}g protein.",
+            [{"tool": "log_food", "args": {"item_name": macros["food_name"], "quantity": payload.quantity, "unit": payload.unit}, "result": result}],
+        )
+    return {**result, "budget": get_overview()}
+
+
+class LogPatch(BaseModel):
+    quantity: float | None = Field(default=None, gt=0, le=2000)
+    unit: Literal["serving", "grams"] | None = None
+    meal_type: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
+
+
+@app.patch("/api/log/{log_id}")
+def edit_log(log_id: int, payload: LogPatch):
+    row = memory_agent.get_log(log_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="That entry no longer exists.")
+    meal_type = payload.meal_type or row["meal_type"]
+    quantity = payload.quantity if payload.quantity is not None else row["quantity"]
+    unit = payload.unit or row.get("unit") or "serving"
+    if payload.quantity is None and payload.unit is None:
+        macros = {"calories": row["calories"], "protein_g": row["protein_g"], "carbs_g": row["carbs_g"], "fat_g": row["fat_g"], "serving_label": row.get("serving_label")}
+    else:
+        if not row.get("food_code"):
+            raise HTTPException(status_code=422, detail="This old entry has no food code, so only its meal can be changed.")
+        macros = math_engine.calculate_meal_macros(row["food_code"], quantity, unit)
+        if "error" in macros:
+            raise HTTPException(status_code=422, detail=macros["error"])
+    memory_agent.update_log(log_id, meal_type, quantity, unit, macros.get("serving_label"), macros["calories"], macros["protein_g"], macros["carbs_g"], macros["fat_g"])
+    memory_agent.maybe_detect_patterns(force=True)
+    return {"status": "updated", "log": memory_agent.get_log(log_id)}
+
+
+@app.delete("/api/log/{log_id}")
+def remove_log(log_id: int):
+    if not memory_agent.delete_log(log_id):
+        raise HTTPException(status_code=404, detail="That entry no longer exists.")
+    memory_agent.maybe_detect_patterns(force=True)
+    return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Weight tracking
+# ---------------------------------------------------------------------------
+class WeightIn(BaseModel):
+    weight_kg: float = Field(gt=25, lt=300)
+    date: str | None = None
+    note: str | None = Field(default=None, max_length=200)
+
+
+@app.get("/api/weight")
+def get_weight(days: int = 120):
+    return {"entries": memory_agent.get_weights(min(max(days, 1), 800))}
+
+
+@app.post("/api/weight")
+def add_weight(payload: WeightIn):
+    day = _valid_log_date(payload.date)
+    memory_agent.log_weight(payload.weight_kg, day, payload.note)
+    return {"status": "logged", "entries": memory_agent.get_weights(120)}
+
+
+@app.delete("/api/weight/{log_date}")
+def remove_weight(log_date: str):
+    if not memory_agent.delete_weight(log_date):
+        raise HTTPException(status_code=404, detail="No reading on that day.")
+    return {"status": "deleted", "entries": memory_agent.get_weights(120)}
+
+
+# ---------------------------------------------------------------------------
+# Custom foods (built from ingredients)
+# ---------------------------------------------------------------------------
+class AnalyzeRequest(BaseModel):
+    name: str = Field(default="My recipe", max_length=80)
+    servings: float = Field(default=1, gt=0, le=100)
+    ingredients: list[dict] = Field(min_length=1, max_length=custom_foods.MAX_INGREDIENTS)
+    use_ai: bool = True
+
+
+class CustomFoodIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    servings: float = Field(default=1, gt=0, le=100)
+    serving_label: str = Field(default="serving", max_length=30)
+    notes: str = Field(default="", max_length=500)
+    ingredients: list[dict] = Field(min_length=1, max_length=custom_foods.MAX_INGREDIENTS)
+
+
+@app.get("/api/custom-foods")
+def list_custom_foods():
+    return {"foods": custom_foods.list_foods(), "ai_available": orchestrator.client is not None}
+
+
+@app.post("/api/custom-foods/analyze")
+def analyze_custom_food(payload: AnalyzeRequest):
+    return custom_foods.analyze(payload.name, payload.servings, payload.ingredients, use_ai=payload.use_ai)
+
+
+@app.post("/api/custom-foods")
+def create_custom_food(payload: CustomFoodIn):
+    result = custom_foods.save(payload.name, payload.servings, payload.serving_label, payload.notes, payload.ingredients)
+    if result.get("status") != "saved":
+        raise HTTPException(status_code=409 if result.get("conflict") else 422, detail=result.get("error", "Could not save."))
+    return result
+
+
+@app.put("/api/custom-foods/{food_id}")
+def update_custom_food(food_id: int, payload: CustomFoodIn):
+    if not custom_foods.get_food(food_id):
+        raise HTTPException(status_code=404, detail="Custom food not found.")
+    result = custom_foods.save(payload.name, payload.servings, payload.serving_label, payload.notes, payload.ingredients, food_id=food_id)
+    if result.get("status") != "saved":
+        raise HTTPException(status_code=409 if result.get("conflict") else 422, detail=result.get("error", "Could not save."))
+    return result
+
+
+@app.delete("/api/custom-foods/{food_id}")
+def delete_custom_food(food_id: int):
+    if not custom_foods.delete(food_id):
+        raise HTTPException(status_code=404, detail="Custom food not found.")
+    return {"status": "deleted", "foods": custom_foods.list_foods()}
+
+
+@app.get("/api/grocery/nutrition")
+def grocery_nutrition():
+    """What the pantry is worth: per-item nutrition (raw values where known) and a total for items measured by weight/volume."""
+    return grocery.nutrition_overview()

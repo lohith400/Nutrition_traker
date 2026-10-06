@@ -139,6 +139,14 @@ def calculate_meal_macros(food_code: str, quantity: float, unit: str = "serving"
     if unit == "grams" and quantity > MAX_GRAMS:
         return {"error": f"{quantity}g looks too large for one log entry (max {MAX_GRAMS}g)."}
 
+    # The user's own custom foods and the built-in reference staples are not rows of food_items.
+    if str(food_code).startswith(("custom:", "ref:")):
+        try:
+            from backend import custom_foods
+        except ImportError:
+            import custom_foods
+        return custom_foods.macros_for(str(food_code), quantity, unit)
+
     conn = _get_conn()
     try:
         row = conn.execute("SELECT * FROM food_items WHERE food_code = ?", (food_code,)).fetchone()

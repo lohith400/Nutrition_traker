@@ -261,3 +261,34 @@ def grams_available(item: dict):
     """Stock of an item in grams (or ml for volumes), or None when it is counted in pieces/packs."""
     conv = _CONVERT.get(item["unit"])
     return item["quantity"] * conv[1] if conv else None
+
+
+def nutrition_overview() -> dict:
+    """Nutrition of what is at home. Pantry items are usually raw, so the raw/reference value is preferred
+    ('rice' -> uncooked rice); the dataset's exact dish row is used when no staple matches."""
+    try:
+        from backend import ingredient_reference as ref, rag_resolver
+    except ImportError:
+        import ingredient_reference as ref, rag_resolver
+    allowed = {"vegan", "vegetarian", "eggetarian", "non_veg"}
+    out, totals, counted = [], {"calories": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0}, 0
+    for item in list_items():
+        name = item["name"]
+        hits = sorted(ref.search("raw " + name, allowed) + ref.search(name, allowed), key=lambda x: -x[0])
+        opt = hits[0][1] if hits else None
+        if opt is None:
+            exact = [c for c in rag_resolver.find_candidates(name, limit=4) if c.get("exact")]
+            opt = exact[0] if exact else None
+        row = {"id": item["id"], "name": name, "matched_to": opt["food_name"] if opt else None, "source": opt["source"] if opt else None,
+               "per_100g": opt["per_100g"] if opt else None, "grams": None, "nutrition": None}
+        if opt and opt.get("per_100g"):
+            entry = ref.get(opt["food_code"][4:]) if opt["food_code"].startswith("ref:") else None
+            grams, _est, _how = ref.grams_for(entry, float(item["quantity"]), item["unit"])
+            if grams:
+                row["grams"] = grams
+                row["nutrition"] = {k: round(v * grams / 100.0, 1) for k, v in opt["per_100g"].items()}
+                for k in totals:
+                    totals[k] += row["nutrition"][k]
+                counted += 1
+        out.append(row)
+    return {"items": out, "totals": {k: round(v) for k, v in totals.items()}, "counted": counted, "total_items": len(out)}

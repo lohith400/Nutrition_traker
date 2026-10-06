@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import "./enhancements.css";
 import AccessGate from "./components/AccessGate";
 
 export const metadata: Metadata = {

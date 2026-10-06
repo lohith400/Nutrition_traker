@@ -143,7 +143,8 @@ def get_user_diet() -> str:
 
 def log_meal(meal_type: str, food_code: str, food_name: str, quantity: float,
              calories: float, protein_g: float, carbs_g: float, fat_g: float,
-             unit: str = "serving", serving_label: str | None = None) -> dict:
+             unit: str = "serving", serving_label: str | None = None,
+             log_date: str | None = None) -> dict:
     """
     Saves one logged food item immediately, and updates the long-term
     food_preferences row for this food so the system learns what the user
@@ -151,18 +152,24 @@ def log_meal(meal_type: str, food_code: str, food_name: str, quantity: float,
     detect_patterns).
     """
     now = datetime.now()
-    date_str = now.strftime("%Y-%m-%d")
+    date_str = log_date or now.strftime("%Y-%m-%d")
+    if log_date and log_date != now.strftime("%Y-%m-%d"):
+        # Logging for an earlier day ("I forgot to log yesterday's lunch"): park it at a mealtime of that day.
+        stamp = f"{date_str} " + {"breakfast": "08:30:00", "lunch": "13:00:00", "snack": "17:00:00", "dinner": "20:00:00"}.get(meal_type, "12:00:00")
+    else:
+        stamp = now.strftime("%Y-%m-%d %H:%M:%S")
     conn = _get_conn()
     try:
-        conn.execute(
+        cur = conn.execute(
             """INSERT INTO daily_logs
                (log_date, log_time, meal_type, food_code, food_name, quantity,
                 calories, protein_g, carbs_g, fat_g, unit, serving_label)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (date_str, now.strftime("%Y-%m-%d %H:%M:%S"), meal_type,
+            (date_str, stamp, meal_type,
              food_code, food_name, quantity, calories, protein_g, carbs_g, fat_g,
              unit, serving_label),
         )
+        log_id = cur.lastrowid
         if food_code:
             col = {"breakfast": "breakfast_count", "lunch": "lunch_count",
                    "dinner": "dinner_count", "snack": "snack_count"}.get(meal_type, "snack_count")
@@ -183,7 +190,7 @@ def log_meal(meal_type: str, food_code: str, food_name: str, quantity: float,
                  quantity, 1 if unit == "grams" else 0),
             )
         conn.commit()
-        return {"status": "logged", "date": date_str}
+        return {"status": "logged", "date": date_str, "log_id": log_id}
     except Exception:
         conn.rollback()
         raise
@@ -196,7 +203,7 @@ def get_todays_logs() -> dict:
     conn = _get_conn()
     try:
         rows = conn.execute(
-            "SELECT meal_type, food_name, quantity, unit, serving_label, calories, protein_g, carbs_g, fat_g "
+            "SELECT log_id, food_code, log_time, meal_type, food_name, quantity, unit, serving_label, calories, protein_g, carbs_g, fat_g "
             "FROM daily_logs WHERE log_date = ? ORDER BY log_time", (today,),
         ).fetchall()
         return {"date": today, "meals": [dict(r) for r in rows]}
@@ -211,7 +218,7 @@ def get_logs_history(days: int = 14) -> list:
     conn = _get_conn()
     try:
         rows = conn.execute(
-            "SELECT log_date, log_time, meal_type, food_name, quantity, unit, serving_label, "
+            "SELECT log_id, food_code, log_date, log_time, meal_type, food_name, quantity, unit, serving_label, "
             "calories, protein_g, carbs_g, fat_g FROM daily_logs WHERE log_date >= ? "
             "ORDER BY log_date DESC, log_time ASC",
             (since,),
@@ -239,6 +246,127 @@ def get_logs_history(days: int = 14) -> list:
         entry["total_carbs_g"] = round(entry["total_carbs_g"], 1)
         entry["total_fat_g"] = round(entry["total_fat_g"], 1)
     return ordered
+
+
+# ---------- Editing / removing log entries ----------
+
+def get_log(log_id: int) -> dict | None:
+    conn = _get_conn()
+    try:
+        r = conn.execute("SELECT * FROM daily_logs WHERE log_id = ?", (int(log_id),)).fetchone()
+        return dict(r) if r else None
+    finally:
+        conn.close()
+
+
+def _forget_preference(conn, row) -> None:
+    """Keep the long-term food habits in step when an entry is removed."""
+    code = row["food_code"]
+    if not code:
+        return
+    col = {"breakfast": "breakfast_count", "lunch": "lunch_count", "dinner": "dinner_count"}.get(row["meal_type"], "snack_count")
+    pref = conn.execute("SELECT times_logged FROM food_preferences WHERE food_code = ?", (code,)).fetchone()
+    if not pref:
+        return
+    if (pref["times_logged"] or 0) <= 1:
+        conn.execute("DELETE FROM food_preferences WHERE food_code = ?", (code,))
+    else:
+        conn.execute(f"UPDATE food_preferences SET times_logged = times_logged - 1, {col} = MAX({col} - 1, 0) WHERE food_code = ?", (code,))
+
+
+def delete_log(log_id: int) -> bool:
+    conn = _get_conn()
+    try:
+        row = conn.execute("SELECT * FROM daily_logs WHERE log_id = ?", (int(log_id),)).fetchone()
+        if row is None:
+            return False
+        conn.execute("DELETE FROM daily_logs WHERE log_id = ?", (int(log_id),))
+        _forget_preference(conn, row)
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def update_log(log_id: int, meal_type: str, quantity: float, unit: str, serving_label: str | None,
+               calories: float, protein_g: float, carbs_g: float, fat_g: float) -> bool:
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            "UPDATE daily_logs SET meal_type=?, quantity=?, unit=?, serving_label=?, calories=?, protein_g=?, carbs_g=?, fat_g=? WHERE log_id=?",
+            (meal_type, quantity, unit, serving_label, calories, protein_g, carbs_g, fat_g, int(log_id)),
+        )
+        conn.commit()
+        return (cur.rowcount or 0) > 0
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+# ---------- Weight tracking ----------
+
+_weight_table_ensured = False
+
+
+def _ensure_weight_table(conn) -> None:
+    global _weight_table_ensured
+    if _weight_table_ensured:
+        return
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS weight_logs (
+               log_date TEXT PRIMARY KEY, weight_kg REAL NOT NULL, note TEXT, logged_at TEXT NOT NULL)"""
+    )
+    conn.commit()
+    _weight_table_ensured = True
+
+
+def log_weight(weight_kg: float, log_date: str | None = None, note: str | None = None) -> dict:
+    """One reading per day; logging again the same day replaces it."""
+    now = datetime.now()
+    day = log_date or now.strftime("%Y-%m-%d")
+    conn = _get_conn()
+    try:
+        _ensure_weight_table(conn)
+        conn.execute(
+            "INSERT OR REPLACE INTO weight_logs (log_date, weight_kg, note, logged_at) VALUES (?, ?, ?, ?)",
+            (day, float(weight_kg), (note or None), now.strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        conn.commit()
+        return {"status": "logged", "date": day, "weight_kg": float(weight_kg)}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_weights(days: int = 90) -> list:
+    since = (datetime.now() - timedelta(days=max(days, 1) - 1)).strftime("%Y-%m-%d")
+    conn = _get_conn()
+    try:
+        _ensure_weight_table(conn)
+        rows = conn.execute(
+            "SELECT log_date, weight_kg, note FROM weight_logs WHERE log_date >= ? ORDER BY log_date ASC", (since,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def delete_weight(log_date: str) -> bool:
+    conn = _get_conn()
+    try:
+        _ensure_weight_table(conn)
+        cur = conn.execute("DELETE FROM weight_logs WHERE log_date = ?", (log_date,))
+        conn.commit()
+        return (cur.rowcount or 0) > 0
+    finally:
+        conn.close()
 
 
 # ---------- Water tracking ----------

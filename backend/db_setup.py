@@ -181,6 +181,31 @@ CREATE TABLE IF NOT EXISTS grocery_items (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS custom_foods (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT NOT NULL,
+    name_key       TEXT NOT NULL UNIQUE,
+    servings       REAL NOT NULL DEFAULT 1,
+    serving_label  TEXT NOT NULL DEFAULT 'serving',
+    total_grams    REAL,
+    calories       REAL NOT NULL,
+    protein_g      REAL NOT NULL,
+    carbs_g        REAL NOT NULL,
+    fat_g          REAL NOT NULL,
+    diet_tag       TEXT,
+    ingredients_json TEXT,
+    notes          TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS weight_logs (
+    log_date   TEXT PRIMARY KEY,
+    weight_kg  REAL NOT NULL,
+    note       TEXT,
+    logged_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS daily_fitness (
     log_date         TEXT PRIMARY KEY,
     steps            INTEGER DEFAULT 0,
@@ -328,7 +353,8 @@ def build_database(reset_user_data: bool = False) -> None:
             "DROP TABLE IF EXISTS detected_patterns; DROP TABLE IF EXISTS food_preferences; "
             "DROP TABLE IF EXISTS user_facts; DROP TABLE IF EXISTS chat_messages; "
             "DROP TABLE IF EXISTS water_logs; DROP TABLE IF EXISTS reminders; "
-            "DROP TABLE IF EXISTS reminder_events; DROP TABLE IF EXISTS grocery_items;"
+            "DROP TABLE IF EXISTS reminder_events; DROP TABLE IF EXISTS grocery_items; "
+            "DROP TABLE IF EXISTS custom_foods; DROP TABLE IF EXISTS weight_logs;"
         )
         conn.commit()
         conn.close()

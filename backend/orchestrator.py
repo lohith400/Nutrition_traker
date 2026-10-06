@@ -11,9 +11,9 @@ import re
 from datetime import datetime
 
 try:
-    from backend import google_fit, grocery, llm_config, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
+    from backend import custom_foods, google_fit, grocery, llm_config, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
 except ImportError:
-    import google_fit, grocery, llm_config, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
+    import custom_foods, google_fit, grocery, llm_config, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
 
 # Supports OpenRouter, Gemini and DeepSeek -- fill any ONE key in backend/.env (see llm_config.py).
 client, MODEL, PROVIDER = llm_config.build_client()
@@ -169,7 +169,9 @@ TOOLS = [
                 "this once with quantity=1 and unit='serving' to see what's available (the result "
                 "tells you whether a standard serving exists), then ask the user whether they mean "
                 "1 standard serving (e.g. 1 bowl / 1 plate / 1 piece -- use the exact unit name the "
-                "tool returns) or an amount in grams, before logging."
+                "tool returns) or an amount in grams, before logging. The result is status 'found' (one exact food), "
+                "'options' (several related foods the user must choose between -- the app shows them as cards), "
+                "'found_needs_grams', 'diet_mismatch' or 'not_found'."
             ),
             "parameters": {
                 "type": "object",
@@ -424,6 +426,38 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "analyze_recipe",
+            "description": (
+                "Work out the calories / protein / carbs / fat of a dish the user made from their own ingredients, e.g. 'I made upma with 60 g rava, "
+                "1 tbsp oil, 1 onion and a handful of peanuts'. Pass every ingredient with its quantity and unit exactly as the user said (g, kg, ml, "
+                "tsp, tbsp, cup, katori, pcs, ...). The tool matches each ingredient to the dataset / reference values and adds everything up -- never add "
+                "numbers yourself. Use this instead of lookup_food when the user lists ingredients. It does not log anything."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "meal_name": {"type": "string", "description": "Name of the dish, e.g. 'Rava upma'."},
+                    "servings": {"type": "number", "description": "How many servings the recipe makes (default 1)."},
+                    "ingredients": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "quantity": {"type": "number"},
+                                "unit": {"type": "string", "description": "g, kg, ml, l, tsp, tbsp, cup, katori, pcs, slice, clove, pinch, handful"},
+                            },
+                            "required": ["name", "quantity"],
+                        },
+                    },
+                },
+                "required": ["meal_name", "ingredients"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_fitness_summary",
             "description": (
                 "Get the user's recorded physical activity (steps, calories burned, running/active minutes, distance) "
@@ -469,13 +503,55 @@ def _tool_find_restaurants(args, location=None):
     return result
 
 
-def _tool_lookup_food(item_name, quantity=1, unit="serving"):
+def _water_result(item_name):
     clean = (item_name or "").strip().lower()
     if clean in ("water", "drinking water", "plain water", "mineral water", "glass of water", "tap water", "water glass") or re.match(r"^(\d+(\.\d+)?\s*(l|liter|liters|ml|glass|glasses)\s*)?(of\s*)?water$", clean):
         return {
             "status": "not_a_food",
             "message": "Plain drinking water has zero calories and is tracked separately as water intake. Use the log_water tool with the amount in liters (e.g. 0.25 for a glass, 0.5 for 500ml, 3.0 for 3 liters) to log water.",
         }
+    return None
+
+
+def _tool_lookup_food_options(item_name, quantity=1, unit="serving"):
+    """What the coach's lookup_food tool returns: ONE exact match, or the RELATED foods to choose from.
+
+    The old behaviour guessed a single food (sometimes wrongly: "masala chai" -> "Masala arbi") or said
+    "not found". Now, unless the name matches exactly one food, the user is shown every related food in the
+    dataset with its nutrition and picks which one they had before anything is logged.
+    """
+    water = _water_result(item_name)
+    if water:
+        return water
+    diet = memory_agent.get_user_diet()
+    cands = rag_resolver.find_candidates(item_name, diet=diet, limit=6)
+    hidden = rag_resolver.count_hidden_by_diet(item_name, diet)
+    exact = [c for c in cands if c.get("exact")]
+    if len(exact) == 1:
+        pick = exact[0]
+        macros = math_engine.calculate_meal_macros(pick["food_code"], quantity, unit)
+        others = [c for c in cands if c["food_code"] != pick["food_code"]][:4]
+        base = {"match_method": "exact", "selected": pick, "related": others, "food_code": pick["food_code"], "source": pick["source"]}
+        if "error" in macros:  # e.g. no reliable serving size: the card still lets the user log it in grams
+            return {"status": "found_needs_grams", "food_name": pick["food_name"], **base, **macros}
+        return {"status": "found", "match_confidence": 1.0, **base, **macros}
+    if cands:
+        return {
+            "status": "options", "query": item_name, "quantity": quantity, "unit": unit, "options": cands, "hidden_by_diet": hidden,
+            "message": (f"No single exact match for '{item_name}', but {len(cands)} related food(s) exist (shown to the user as tappable cards with full "
+                        "nutrition). Do NOT say the food was not found, do NOT pick one for them and do NOT log anything. Tell them briefly you found related "
+                        "foods, name the top 2-3 with their calories per serving from the result, and ask which one they had and how much."),
+        }
+    if hidden:
+        return {"status": "diet_mismatch", "query": item_name, "diet": diet}
+    return {"status": "not_found", "query": item_name,
+            "message": "Nothing related in the database or reference list. Ask them to describe it differently or give its main ingredients (the app can build a custom food from ingredients)."}
+
+
+def _tool_lookup_food(item_name, quantity=1, unit="serving"):
+    water = _water_result(item_name)
+    if water:
+        return water
     diet = memory_agent.get_user_diet()
     match = rag_resolver.resolve_food(item_name, diet=diet)
     if match.get("status") != "matched":
@@ -588,6 +664,19 @@ def _tool_analyze_grocery_meal(meal_name, ingredients):
     return result
 
 
+def _tool_analyze_recipe(args):
+    ingredients = [{"name": i.get("name"), "quantity": i.get("quantity"), "unit": i.get("unit") or "g"} for i in (args.get("ingredients") or []) if isinstance(i, dict)]
+    result = custom_foods.analyze(args.get("meal_name") or "My recipe", args.get("servings") or 1, ingredients, use_ai=True)
+    if result.get("status") != "ok":
+        return result
+    # Keep the chat event small: the UI needs the per-100g values to save the dish, not the alternative lists.
+    for line in result["ingredients"]:
+        line.pop("alternatives", None)
+    result["note_for_coach"] = ("Report the per-serving and total numbers exactly as given. Mention anything in 'warnings' or 'unresolved'. Tell the user they can "
+                                "tap 'Save as custom food' on the card, after which you can log it by name.")
+    return result
+
+
 def _tool_set_reminder(args):
     return reminders.create_reminder(
         args.get("kind", ""), args.get("time", ""), args.get("repeat") or "daily", args.get("food_name"),
@@ -627,7 +716,8 @@ TOOL_IMPL = {
     "remove_grocery_items": lambda args: grocery.remove_items(args.get("items") or []),
     "get_grocery_list": lambda args: _tool_get_grocery_list(),
     "analyze_grocery_meal": lambda args: _tool_analyze_grocery_meal(args.get("meal_name", "Meal"), args.get("ingredients") or []),
-    "lookup_food": lambda args: _tool_lookup_food(args.get("item_name", ""), args.get("quantity", 1) or 1, args.get("unit") or "serving"),
+    "lookup_food": lambda args: _tool_lookup_food_options(args.get("item_name", ""), args.get("quantity", 1) or 1, args.get("unit") or "serving"),
+    "analyze_recipe": _tool_analyze_recipe,
     "log_food": lambda args: tool_log_food_item(args.get("item_name", ""), args.get("quantity", 1) or 1, args.get("meal_type") or "snack", args.get("unit") or "serving"),
     "log_water": lambda args: _tool_log_water(args.get("amount_l") or 0),
     "get_today_summary": lambda args: _context(),
@@ -711,9 +801,19 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
         "whether to log it (and as which meal); on a clear yes, call log_food once per ingredient with unit 'grams'; "
         "afterwards offer to remove the used amounts from the grocery list. "
         "(c) For every OTHER request about what to eat, do NOT look at the grocery list -- use suggest_meal as usual.\n"
-        "If lookup_food returns not_found, say so plainly, don't invent numbers, and ask them to rephrase "
-        "or try a simpler/more common name. If it returns diet_mismatch, tell them that food doesn't fit "
-        "their diet and ask if they'd like an alternative.\n"
+        "FOOD OPTIONS: lookup_food returns status 'found' when the name matches exactly one food. When it returns 'options' there is no "
+        "single exact match, but related foods DO exist in the dataset: the app shows them to the user as cards with calories, protein, carbs "
+        "and fat. Never tell the user the food 'could not be found' in that case. Say you found related foods, mention the top two or three with "
+        "their calories per serving (numbers from the result only), and ask which one they had and how much. The user can tap a card to log it "
+        "directly, or answer in chat; when they answer in chat, call lookup_food again with the exact food_name they chose. Never choose among options "
+        "for them and never log from an 'options' result. Foods labelled source 'reference' are typical values for everyday staples (banana, milk, raw "
+        "rice, oil) and source 'custom' are the user's own saved dishes -- you may say so.\n"
+        "'found_needs_grams' means the exact food exists but has no reliable serving size: ask for the weight in grams. "
+        "If lookup_food returns not_found, say so plainly, don't invent numbers, and suggest describing it by its main ingredients -- then use analyze_recipe. "
+        "If it returns diet_mismatch, tell them that food doesn't fit their diet and ask if they'd like an alternative.\n"
+        "HOME-COOKED DISHES: when the user lists ingredients with amounts ('I made upma with 60 g rava, 1 tbsp oil and an onion'), call analyze_recipe "
+        "with every ingredient and its unit, then report servings, per-serving and total calories/protein/carbs/fat exactly as returned, and flag any "
+        "'unresolved' ingredient or AI-estimated line honestly. Tell them they can tap 'Save as custom food' on the card; once saved you can log it by name.\n"
         "When the user asks what to eat, for meal ideas, or how to hit their goals (and did NOT ask to use their grocery list), ALWAYS call "
         "suggest_meal and present ONLY the foods it returns -- never suggest a food from your own "
         "knowledge, even one that sounds healthy or plausible. If suggest_meal returns nothing useful, "

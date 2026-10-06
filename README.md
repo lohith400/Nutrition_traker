@@ -2,6 +2,18 @@
 
 NutriSync is a nutrition coach for Indian food. It combines deterministic nutrition calculations with food matching, SQLite-backed meal history, meal suggestions, and an optional AI coach.
 
+
+## What's new in this version
+
+- **Coach shows related foods before logging.** When a name isn't an exact match, the coach no longer says "not found" or guesses. It shows every related food from the dataset as tappable cards with calories, protein, carbs and fat (per serving and per 100 g). You pick the one you had, set the amount and meal, and only then is it logged. The same search powers the Food log and Overview.
+- **Custom foods page** (`/custom-foods`). List ingredients with quantities (g, tbsp, cup, katori, pieces...). Each is matched to dataset rows, a built-in table of everyday staples (`backend/ingredient_reference.py`: oil, ghee, raw rice, dal, vegetables, fruit...), or an AI estimate that is clearly labelled. Python adds everything up; the model never does arithmetic. Save the dish and log it from anywhere, including by name in the coach. You can also just tell the coach "I made upma with 60 g rava, 1 tbsp oil and an onion".
+- **Food log:** search and log (including for an earlier day), edit quantity or meal, delete entries, per-day macro split, 7-day chart.
+- **Overview:** calorie ring, macro bars, smart food search, remove entries.
+- **Progress:** weight tracking with trend chart, pace and estimated goal date; 5-week consistency heatmap and streak.
+- **Grocery:** nutrition of what's at home (raw values), quick-add staples. **Meal plans:** plan-fit meter and per-slot calorie ranges.
+
+New API endpoints: `GET /api/food-options`, `POST /api/log-food-code`, `PATCH|DELETE /api/log/{id}`, `GET|POST|DELETE /api/weight`, `/api/custom-foods` (list, analyze, create, update, delete), `GET /api/grocery/nutrition`. New tables (`custom_foods`, `weight_logs`) are created automatically on existing databases. Tests: `python -m pytest tests`.
+
 ## Project structure
 
 ```text

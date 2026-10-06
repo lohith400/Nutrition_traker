@@ -6,6 +6,7 @@ import {
   Activity,
   AlarmClock,
   Bell,
+  ChefHat,
   ChevronRight,
   HeartPulse,
   Home,
@@ -20,11 +21,12 @@ import {
 
 export const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
-export type NavKey = "overview" | "log" | "plans" | "grocery" | "reminders" | "progress" | "chat" | "profile" | "health";
+export type NavKey = "overview" | "log" | "custom" | "plans" | "grocery" | "reminders" | "progress" | "chat" | "profile" | "health";
 
 const NAV: { key: NavKey; label: string; href: string; Icon: typeof Home }[] = [
   { key: "overview", label: "Overview", href: "/", Icon: Home },
   { key: "log", label: "Food log", href: "/log", Icon: Utensils },
+  { key: "custom", label: "Custom foods", href: "/custom-foods", Icon: ChefHat },
   { key: "plans", label: "Meal plans", href: "/meal-plans", Icon: Leaf },
   { key: "grocery", label: "Grocery", href: "/grocery", Icon: ShoppingCart },
   { key: "reminders", label: "Reminders", href: "/reminders", Icon: AlarmClock },
