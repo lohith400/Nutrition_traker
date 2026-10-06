@@ -15,7 +15,7 @@ try:
 except ImportError:
     import custom_foods, google_fit, grocery, llm_config, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
 
-# Supports OpenRouter, Gemini and DeepSeek -- fill any ONE key in backend/.env (see llm_config.py).
+# Primary provider: Google AI Studio (Gemini) with zero-crash cascade; fallback: OpenRouter, DeepSeek.
 client, MODEL, PROVIDER = llm_config.build_client()
 
 

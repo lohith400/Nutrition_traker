@@ -136,7 +136,7 @@ def test_llm_each_single_key_works(monkeypatch):
     all_vars = ("OPENROUTER_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_MODEL", "GEMINI_MODEL",
                 "DEEPSEEK_MODEL", "LLM_PROVIDER", "LLM_MODEL")
     cases = {
-        "OPENROUTER_API_KEY": ("openrouter", "openai/gpt-4o-mini", "openrouter.ai"),
+        "OPENROUTER_API_KEY": ("openrouter", "openrouter/free", "openrouter.ai"),
         "GEMINI_API_KEY": ("gemini", "auto", "generativelanguage.googleapis.com"),
         "DEEPSEEK_API_KEY": ("deepseek", "deepseek-chat", "api.deepseek.com"),
     }
@@ -163,8 +163,8 @@ def test_llm_each_single_key_works(monkeypatch):
     assert llm_config.resolve_settings()["model"] == "gemini-2.5-pro"
 
 
-def test_gemini_auto_picks_newest_and_survives_retired_model(monkeypatch):
-    """Gemini with no model set: newest Flash is chosen; a 404 'no longer available' falls back."""
+def test_gemini_fallback_cascade_sequence(monkeypatch):
+    """Gemini cascade handles 404, 429, and 503 errors and steps through cascade models."""
     from types import SimpleNamespace
     from backend import llm_config
 
@@ -174,43 +174,119 @@ def test_gemini_auto_picks_newest_and_survives_retired_model(monkeypatch):
     _, model, provider = llm_config.build_client()
     assert (provider, model) == ("gemini", "auto")
 
-    class NotFound(Exception):
-        status_code = 404
+    class StatusError(Exception):
+        def __init__(self, msg, code):
+            super().__init__(msg)
+            self.status_code = code
 
-    listed = ["models/gemini-2.5-flash", "models/gemini-3.8-flash", "models/gemini-3.8-flash-lite",
-              "models/gemini-3.8-pro", "models/gemini-3.8-flash-image", "models/text-embedding-004",
-              "models/gemini-2.5-flash-preview-tts", "models/gemini-flash-latest"]
     calls = []
 
     def create(**kw):
-        calls.append(kw["model"])
-        if kw["model"] == "gemini-3.8-flash":
-            raise NotFound("This model is no longer available to new users")
-        return SimpleNamespace(ok=kw["model"])
+        m = kw["model"]
+        calls.append(m)
+        if m == "gemini-2.5-flash":
+            raise StatusError("model not found / deprecated", 404)
+        if m == "gemini-2.5-flash-lite":
+            raise StatusError("quota exceeded / rate limit", 429)
+        if m == "gemini-2.0-flash":
+            raise StatusError("service overloaded", 503)
+        return SimpleNamespace(ok=m)
 
     fake = SimpleNamespace(
-        models=SimpleNamespace(list=lambda: [SimpleNamespace(id=i) for i in listed]),
+        models=SimpleNamespace(list=lambda: []),
         chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
     )
-    # 1) newest flash is tried first, 404 -> falls back to the next candidate and remembers it
-    assert llm_config.create_completion(fake, model="auto", messages=[]).ok == "gemini-3.8-flash-lite"
-    assert calls[0] == "gemini-3.8-flash"
-    assert llm_config.create_completion(fake, model="auto", messages=[]).ok == "gemini-3.8-flash-lite"
-    assert calls[-1] == "gemini-3.8-flash-lite" and len(calls) == 3  # no re-probing once a model works
 
-    # 2) a user-pinned retired model also falls back instead of erroring
-    llm_config.build_client()
+    # First call: steps through 2.5-flash (404) -> 2.5-flash-lite (429) -> 2.0-flash (503) -> 1.5-flash (succeeds)
+    res = llm_config.create_completion(fake, model="auto", messages=[])
+    assert res.ok == "gemini-1.5-flash"
+    assert calls == ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
+
+    # Second call: remembers gemini-1.5-flash
     calls.clear()
-    assert llm_config.create_completion(fake, model="gemini-2.0-flash", messages=[]).ok
-    # 3) non-model errors (auth / quota) are NOT swallowed
-    class Auth(Exception):
-        status_code = 401
-    def bad(**kw):
-        raise Auth("invalid api key")
-    fake.chat.completions.create = bad
+    res2 = llm_config.create_completion(fake, model="auto", messages=[])
+    assert res2.ok == "gemini-1.5-flash"
+    assert calls == ["gemini-1.5-flash"]
+
+
+def test_gemini_dynamic_discovery_when_cascade_fails(monkeypatch):
+    """When all hardcoded cascade models fail, dynamic discovery queries client.models.list()."""
+    from types import SimpleNamespace
+    from backend import llm_config
+
+    for var in ("OPENROUTER_API_KEY", "DEEPSEEK_API_KEY", "GEMINI_MODEL", "LLM_MODEL", "LLM_PROVIDER"):
+        monkeypatch.setenv(var, "")
+    monkeypatch.setenv("GEMINI_API_KEY", "AIzaFake")
     llm_config.build_client()
-    with pytest.raises(Auth):
-        llm_config.create_completion(fake, model="auto", messages=[])
+
+    calls = []
+
+    def create(**kw):
+        m = kw["model"]
+        calls.append(m)
+        if m in llm_config.GEMINI_CASCADE_MODELS:
+            raise Exception("404 Not Found")
+        if m == "gemini-3.0-flash":
+            return SimpleNamespace(ok=m)
+        raise Exception("404 Not Found")
+
+    fake_models = [
+        SimpleNamespace(id="models/gemini-embedding-exp", supported_generation_methods=["embedContent"]),
+        SimpleNamespace(id="models/gemini-3.0-flash", supported_generation_methods=["generateContent"]),
+        SimpleNamespace(id="models/gemini-2.5-flash", supported_generation_methods=["generateContent"]),
+    ]
+
+    fake = SimpleNamespace(
+        models=SimpleNamespace(list=lambda: fake_models),
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+    )
+
+    res = llm_config.create_completion(fake, model="auto", messages=[])
+    assert res.ok == "gemini-3.0-flash"
+    # Verifies all 5 cascade models were tried, then dynamic discovery tried gemini-3.0-flash
+    assert calls[:5] == llm_config.GEMINI_CASCADE_MODELS
+    assert calls[5] == "gemini-3.0-flash"
+
+
+def test_gemini_multi_provider_fallback_to_openrouter(monkeypatch):
+    """When Gemini key is configured but all models fail, falls back to OpenRouter."""
+    from types import SimpleNamespace
+    from backend import llm_config
+
+    for var in ("DEEPSEEK_API_KEY", "GEMINI_MODEL", "OPENROUTER_MODEL", "LLM_MODEL", "LLM_PROVIDER"):
+        monkeypatch.setenv(var, "")
+    monkeypatch.setenv("GEMINI_API_KEY", "AIzaFake")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
+    llm_config.build_client()
+
+    # All Gemini models fail with 429
+    def create_gemini(**kw):
+        raise Exception("429 Too Many Requests / Quota Exceeded")
+
+    fake_gemini = SimpleNamespace(
+        models=SimpleNamespace(list=lambda: []),
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create_gemini)),
+    )
+
+    # Monkeypatch OpenRouter client creation in llm_config
+    openrouter_calls = []
+
+    class MockOpenRouterClient:
+        def __init__(self, base_url, api_key):
+            assert "openrouter.ai" in base_url
+            assert api_key == "sk-or-fake"
+            self.chat = SimpleNamespace(
+                completions=SimpleNamespace(
+                    create=lambda **kw: openrouter_calls.append(kw) or SimpleNamespace(ok="openrouter-success")
+                )
+            )
+
+    monkeypatch.setattr(llm_config, "OpenAI", MockOpenRouterClient)
+
+    res = llm_config.create_completion(fake_gemini, model="auto", messages=[])
+    assert res.ok == "openrouter-success"
+    assert len(openrouter_calls) == 1
+    assert openrouter_calls[0]["model"] == "openrouter/free"
 
 
 # ---------------------------------------------------------------------------

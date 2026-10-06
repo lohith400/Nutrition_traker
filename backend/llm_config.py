@@ -1,38 +1,50 @@
-"""LLM client setup for exactly three providers: OpenRouter, Gemini, DeepSeek.
+"""LLM client setup for Google AI Studio (Gemini), OpenRouter, and DeepSeek.
 
-Fill in ONE of these keys in backend/.env and leave the other two blank:
-
-    OPENROUTER_API_KEY=...
-    GEMINI_API_KEY=...
-    DEEPSEEK_API_KEY=...
-
-Whichever key is filled is the one used. If you fill more than one, the first
-in this order wins: OpenRouter, Gemini, DeepSeek -- or force one with
-LLM_PROVIDER=openrouter|gemini|deepseek.
-
-Optional model override per provider (defaults are used when blank):
-    OPENROUTER_MODEL, GEMINI_MODEL, DEEPSEEK_MODEL   (or LLM_MODEL for whichever is active)
-
-Gemini needs no model name: when GEMINI_MODEL is blank the backend asks Google
-which models your key can use and picks the newest Gemini Flash automatically.
-If a model is ever retired (404 "no longer available"), it silently switches to
-the next available one instead of failing.
+Features a zero-crash, multi-model Gemini fallback cascade using Google AI Studio:
+1. When GEMINI_API_KEY is provided, Gemini is preferred by default.
+2. Ordered production & fallback cascade:
+   - gemini-2.5-flash
+   - gemini-2.5-flash-lite
+   - gemini-2.0-flash
+   - gemini-1.5-flash
+   - gemini-1.5-flash-8b
+3. Catches 404 (model not found / deprecated), 429 (rate limits / quota exhausted),
+   and 503 (server overloaded). Logs a warning and immediately attempts generation
+   with the next model in the fallback sequence.
+4. Dynamic Discovery: If all hardcoded cascade models fail, queries client.models.list()
+   for the first available active model supporting `generateContent` containing "flash".
+5. Multi-Provider Fallback: If no Gemini key is set or all Gemini attempts fail,
+   falls back to OpenRouter using OPENROUTER_API_KEY with openrouter/free (or configured model).
 """
 import logging
 import os
-import re
 
 from openai import OpenAI
 
 log = logging.getLogger("nutrisync.llm")
 
+# Ordered cascade models for Google AI Studio
+GEMINI_CASCADE_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
+]
+
 # provider -> (key env var, model env var, base_url, default model)
+# Gemini is first so it is preferred when GEMINI_API_KEY is present
 PROVIDERS = {
-    "openrouter": ("OPENROUTER_API_KEY", "OPENROUTER_MODEL", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
     "gemini": ("GEMINI_API_KEY", "GEMINI_MODEL", "https://generativelanguage.googleapis.com/v1beta/openai/", "auto"),
+    "openrouter": ("OPENROUTER_API_KEY", "OPENROUTER_MODEL", "https://openrouter.ai/api/v1", "openrouter/free"),
     "deepseek": ("DEEPSEEK_API_KEY", "DEEPSEEK_MODEL", "https://api.deepseek.com", "deepseek-chat"),
 }
 ALIASES = {"google": "gemini", "google-gemini": "gemini"}
+
+_SKIP = (
+    "image", "tts", "audio", "live", "embed", "vision", "robotics",
+    "computer", "native", "dialog", "learnlm", "aqa", "imagen", "veo",
+)
 
 
 def _clean(name: str) -> str:
@@ -44,13 +56,15 @@ def _clean(name: str) -> str:
 
 
 def resolve_settings() -> dict:
-    """Pick the provider whose key is filled in and return its settings."""
+    """Pick the provider whose key is filled in and return its settings.
+    Default order prefers Gemini, then OpenRouter, then DeepSeek.
+    """
     forced = _clean("LLM_PROVIDER").lower()
     forced = ALIASES.get(forced, forced)
     if forced and forced not in PROVIDERS:
         raise ValueError(f"Unknown LLM_PROVIDER '{forced}'. Use one of: {', '.join(PROVIDERS)}")
 
-    order = [forced] if forced else list(PROVIDERS)
+    order = [forced] if forced else ["gemini", "openrouter", "deepseek"]
     for name in order:
         key_var, model_var, base_url, default_model = PROVIDERS[name]
         key = _clean(key_var)
@@ -73,43 +87,87 @@ def build_client():
 
 
 # ---------------------------------------------------------------------------
-# Gemini: discover available models instead of hard-coding one
+# Gemini Fallback & Dynamic Discovery
 # ---------------------------------------------------------------------------
-_SKIP = ("image", "tts", "audio", "live", "embed", "vision", "robotics", "computer", "native", "dialog",
-         "learnlm", "aqa", "imagen", "veo")
+def _is_fallback_error(exc) -> bool:
+    """True when the error is 404 (model not found / deprecated),
+    429 (rate limits / quota exhausted), or 503 (server overloaded / unavailable).
+    """
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(exc, "code", None)
+    if status is None and hasattr(exc, "response"):
+        status = getattr(exc.response, "status_code", None)
 
-
-def _rank_gemini(model_id: str):
-    """Sort key for usable text/chat Gemini models: newest Flash first, then Pro, then Lite."""
-    name = model_id.split("/")[-1].lower()
-    if not name.startswith("gemini-") or any(word in name for word in _SKIP):
-        return None
-    m = re.match(r"gemini-(\d+(?:\.\d+)?)-(flash|pro)(.*)$", name)
-    if m:
-        version, family, rest = float(m.group(1)), m.group(2), m.group(3)
-        return (0 if family == "flash" else 1, -version, 1 if "lite" in rest else 0,
-                1 if ("preview" in rest or "exp" in rest) else 0, name)
-    if name in ("gemini-flash-latest", "gemini-pro-latest"):  # aliases Google keeps pointing at the newest model
-        return (2, 0, 0, 0, name)
-    return None
-
-
-def _gemini_candidates(client, refresh=False):
-    if _state["candidates"] is None or refresh:
-        ids = [m.id for m in client.models.list()]
-        ranked = sorted((r, i.split("/")[-1]) for i in ids if (r := _rank_gemini(i)) is not None)
-        _state["candidates"] = [name for _, name in ranked]
-        log.info("Gemini models available to this key (best first): %s", _state["candidates"][:8])
-    return _state["candidates"]
-
-
-def _is_model_error(exc) -> bool:
-    """True when the failure is about the model itself (retired / unknown / unsupported), not auth or quota."""
-    text = str(exc).lower()
-    if getattr(exc, "status_code", None) == 404:
+    if status in (404, 429, 503):
         return True
-    return any(p in text for p in ("no longer available", "is not found", "not_found", "is not supported",
-                                   "model not found", "does not exist"))
+
+    code_str = str(status).upper() if status is not None else ""
+    if code_str in ("RESOURCE_EXHAUSTED", "NOT_FOUND", "UNAVAILABLE"):
+        return True
+
+    text = str(exc).lower()
+    fallback_terms = (
+        # 404
+        "404", "not found", "not_found", "no longer available",
+        "does not exist", "is not supported", "model not found", "deprecated",
+        # 429
+        "429", "rate limit", "ratelimit", "resource_exhausted", "quota", "too many requests",
+        # 503
+        "503", "overloaded", "unavailable", "service unavailable", "backend error",
+    )
+    return any(term in text for term in fallback_terms)
+
+
+def _discover_gemini_models(client) -> list:
+    """Query client.models.list() to discover available active models containing 'flash'
+    and supporting generateContent.
+    """
+    try:
+        raw_list = client.models.list()
+        items = list(raw_list)
+    except Exception as exc:
+        log.warning("Failed to query client.models.list() for dynamic discovery: %s", exc)
+        return []
+
+    discovered = []
+    for item in items:
+        raw_id = (
+            getattr(item, "id", None)
+            or getattr(item, "name", None)
+            or (item.get("id") if isinstance(item, dict) else None)
+            or (item.get("name") if isinstance(item, dict) else None)
+            or str(item)
+        )
+        model_id = str(raw_id).split("/")[-1]
+        name_lower = model_id.lower()
+
+        # Must contain "flash"
+        if "flash" not in name_lower:
+            continue
+
+        # Skip non-chat/unwanted models
+        if any(skip in name_lower for skip in _SKIP):
+            continue
+
+        # Check supported_generation_methods if available
+        methods = getattr(item, "supported_generation_methods", None)
+        if methods is None and isinstance(item, dict):
+            methods = item.get("supported_generation_methods")
+        if methods is not None:
+            methods_str = [str(m).lower() for m in methods]
+            if not any("generatecontent" in m for m in methods_str):
+                continue
+
+        # Check state/status if available
+        state = getattr(item, "state", None) or (item.get("state") if isinstance(item, dict) else None)
+        if state and str(state).upper() in ("DEPRECATED", "DISABLED", "INACTIVE"):
+            continue
+
+        discovered.append(model_id)
+
+    log.info("Dynamically discovered Gemini models: %s", discovered)
+    return discovered
 
 
 def _call(client, **kwargs):
@@ -124,37 +182,109 @@ def _call(client, **kwargs):
 
 
 def create_completion(client, **kwargs):
-    """Chat completion for the active provider.
+    """Chat completion for the active provider with zero-crash fallback cascade.
 
-    OpenRouter / DeepSeek: plain call with the configured model.
-    Gemini: model is auto-detected when not overridden, and if the model is retired or
-    unavailable the next available Gemini model is used instead of returning an error.
+    For Gemini:
+    - Executes ordered cascade: gemini-2.5-flash -> gemini-2.5-flash-lite ->
+      gemini-2.0-flash -> gemini-1.5-flash -> gemini-1.5-flash-8b.
+    - Catches 404, 429, and 503 errors and attempts the next model.
+    - If all hardcoded cascade models fail, dynamically queries client.models.list()
+      for active models containing "flash" supporting generateContent.
+    - If all Gemini models fail or key errors occur, falls back to OpenRouter
+      if OPENROUTER_API_KEY is configured.
     """
-    if _state["provider"] != "gemini":
+    provider = _state.get("provider") or resolve_settings().get("provider")
+
+    if client is None:
+        openrouter_key = _clean("OPENROUTER_API_KEY")
+        if openrouter_key:
+            or_model = _clean("LLM_MODEL") or _clean("OPENROUTER_MODEL") or "openrouter/free"
+            or_client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=openrouter_key)
+            return _call(or_client, model=or_model, **kwargs)
+        raise RuntimeError("No AI client configured (set GEMINI_API_KEY or OPENROUTER_API_KEY)")
+
+    if provider != "gemini":
+        if kwargs.get("model") in ("auto", None, ""):
+            kwargs["model"] = (
+                _clean("LLM_MODEL")
+                or _clean(PROVIDERS.get(provider, ("", "", "", ""))[1])
+                or PROVIDERS.get(provider, ("", "", "", "openrouter/free"))[3]
+            )
         return _call(client, **kwargs)
 
     requested = kwargs.pop("model", None)
-    model = _state["model"] or (requested if requested and requested != "auto" else None)
+
+    # Priority model: remembered working model or explicitly requested model
+    priority_model = _state.get("model")
+    if not priority_model and requested and requested != "auto":
+        priority_model = requested
+
+    # Build candidates starting with priority model, then GEMINI_CASCADE_MODELS
+    candidates = []
+    if priority_model:
+        candidates.append(priority_model)
+    for m in GEMINI_CASCADE_MODELS:
+        if m not in candidates:
+            candidates.append(m)
+
     tried = []
-    for _ in range(6):
-        if model is None:
-            candidates = [c for c in _gemini_candidates(client) if c not in tried]
-            if not candidates:
-                raise RuntimeError("No usable Gemini model is available for this API key.")
-            model = candidates[0]
+    last_exc = None
+
+    # Step 1: Run through hardcoded cascade models
+    for model in candidates:
         try:
-            response = _call(client, model=model, **kwargs)
-            _state["model"] = model  # remember the model that works
-            return response
+            resp = _call(client, model=model, **kwargs)
+            _state["model"] = model  # Remember working model
+            return resp
         except Exception as exc:
-            if not _is_model_error(exc):
-                raise
-            log.warning("Gemini model '%s' unavailable (%s); trying another.", model, str(exc)[:120])
+            last_exc = exc
+            if _is_fallback_error(exc):
+                log.warning("Gemini model '%s' failed (%s); attempting next fallback model.", model, str(exc)[:150])
+                tried.append(model)
+                if _state.get("model") == model:
+                    _state["model"] = None
+                continue
+            log.warning("Gemini model '%s' encountered error: %s", model, str(exc)[:150])
             tried.append(model)
-            _state["model"] = None
-            model = None
-            try:
-                _gemini_candidates(client, refresh=True)
-            except Exception:
-                raise exc
-    raise RuntimeError(f"No working Gemini model found (tried: {', '.join(tried)}).")
+            break
+
+    # Step 2: Dynamic Discovery if hardcoded cascade models failed
+    log.warning("All hardcoded Gemini cascade models failed (tried: %s). Running dynamic discovery.", tried)
+    discovered = _discover_gemini_models(client)
+    for model in discovered:
+        if model in tried:
+            continue
+        try:
+            resp = _call(client, model=model, **kwargs)
+            _state["model"] = model
+            return resp
+        except Exception as exc:
+            last_exc = exc
+            if _is_fallback_error(exc):
+                log.warning("Dynamically discovered Gemini model '%s' failed (%s); attempting next fallback model.", model, str(exc)[:150])
+                tried.append(model)
+                continue
+            log.warning("Dynamically discovered Gemini model '%s' encountered error: %s", model, str(exc)[:150])
+            tried.append(model)
+            break
+
+    # Step 3: Multi-Provider Fallback to OpenRouter
+    openrouter_key = _clean("OPENROUTER_API_KEY")
+    if openrouter_key:
+        or_model = _clean("LLM_MODEL") or _clean("OPENROUTER_MODEL") or "openrouter/free"
+        log.warning(
+            "All Gemini attempts failed (tried: %s). Falling back to OpenRouter using model '%s'.",
+            tried,
+            or_model,
+        )
+        try:
+            or_client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=openrouter_key)
+            return _call(or_client, model=or_model, **kwargs)
+        except Exception as or_exc:
+            log.error("OpenRouter fallback failed after Gemini failure: %s", or_exc)
+            raise or_exc
+
+    raise RuntimeError(
+        f"All Gemini models failed (tried: {', '.join(tried)}) and no fallback provider is configured. "
+        f"Last error: {last_exc}"
+    )
