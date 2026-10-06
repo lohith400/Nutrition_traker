@@ -54,7 +54,9 @@ Skip the last command if you want to start fresh.
 | `TURSO_AUTH_TOKEN` | the token |
 | `OPENROUTER_API_KEY` | your key (or `GEMINI_API_KEY` / `DEEPSEEK_API_KEY` -- only one) |
 | `ACCESS_KEY` | a long password you invent (protects your data and AI credits) |
-| `NTFY_TOPIC` | your ntfy topic (phone reminders), optional |
+| `VAPID_PUBLIC_KEY` | generated via `python scripts/generate_vapid_keys.py`, optional |
+| `VAPID_PRIVATE_KEY` | generated private key, optional |
+| `VAPID_CLAIM_EMAIL` | `mailto:you@example.com`, optional |
 | `TZ` | `Asia/Kolkata` |
 | `CORS_ORIGIN_REGEX` | `https://.*\.vercel\.app` |
 
@@ -72,16 +74,16 @@ Skip the last command if you want to start fresh.
 ## 4. Use it on your phone
 Open the Vercel URL on your phone. The first time it asks for the **access key** (the `ACCESS_KEY` you set on Render); it is remembered on that device.
 
-* **Android (Chrome):** menu (three dots) -> **Install app** / **Add to Home screen**.
-* **iPhone (must be Safari):** Share button -> **Add to Home Screen**.
+* **Android (Chrome):** menu (three dots) -> **Install app** / **Add to Home screen**. Web Push lock-screen notifications work directly once enabled on the Reminders page.
+* **iPhone (must be Safari, iOS 16.4+):** Share button -> **Add to Home Screen**. You must open the installed Home Screen app to enable Web Push notifications.
 
-HTTPS is automatic, so the mic, camera and location buttons work.
+HTTPS is automatic, so the mic, camera, location and Web Push notifications work.
 
 ---
 
 ## What to expect (free-tier honesty)
 * **Sleeping:** Render's free service stops after 15 minutes without traffic; the first request afterwards takes about 30-60 seconds. Your data is safe in Turso either way.
-* **Reminders on Render free:** the service sleeps after about 15 minutes idle, so reminders only fire while it is awake. Use a free uptime pinger on /health every 5 minutes and check Render's current terms.
+* **Reminders on Render free:** on Render's free plan the server sleeps after ~15 min idle and reminders only fire while it is awake, so add a free uptime pinger (e.g. UptimeRobot) hitting `https://<service>.onrender.com/health` every 5 minutes; reminders later than `REMINDER_GRACE_MINUTES` (default 15 min) are skipped by design.
 * **Speed:** every database query is now a network call to Turso. If screens feel slow, make sure the Turso location is close to Render's Singapore region.
 * **Timezone on Windows:** Linux/Docker/Render uses `TZ=Asia/Kolkata`. Do NOT set `TZ` in `.env` on Windows; Windows already uses your system clock.
 * **Chat memory:** every message is saved in Turso (`chat_messages`), and the last 20 turns (`CHAT_CONTEXT_MESSAGES`) are loaded for the coach on every request.

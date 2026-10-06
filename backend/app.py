@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -249,6 +249,82 @@ class ReminderPatch(BaseModel):
     enabled: bool
 
 
+class PushKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSubscribeIn(BaseModel):
+    endpoint: str
+    keys: PushKeys
+
+
+class PushUnsubscribeIn(BaseModel):
+    endpoint: str
+
+
+@app.get("/api/reminders/push/vapid-public-key")
+def get_vapid_public_key():
+    return {
+        "public_key": reminders.vapid_public_key(),
+        "configured": reminders.vapid_configured(),
+    }
+
+
+@app.post("/api/reminders/push/subscribe")
+def subscribe_push(payload: PushSubscribeIn, request: Request):
+    if not reminders.vapid_configured():
+        raise HTTPException(status_code=503, detail="VAPID keys are not configured on the server.")
+    user_agent = request.headers.get("user-agent", "")
+    try:
+        reminders.save_subscription(
+            payload.endpoint,
+            payload.keys.p256dh,
+            payload.keys.auth,
+            user_agent=user_agent,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"status": "ok"}
+
+
+@app.post("/api/reminders/push/unsubscribe")
+def unsubscribe_push(payload: PushUnsubscribeIn):
+    reminders.delete_subscription(payload.endpoint)
+    return {"status": "ok"}
+
+
+@app.post("/api/reminders/test-push")
+def test_push_notification():
+    if not reminders.vapid_configured():
+        raise HTTPException(status_code=400, detail="VAPID keys are not configured on the server.")
+    subs = reminders.list_subscriptions()
+    if not subs:
+        raise HTTPException(status_code=400, detail="No devices are subscribed to push notifications.")
+
+    payload = {
+        "title": "NutriSync Test",
+        "body": "Web push notifications are working!",
+        "url": "/reminders",
+        "tag": "nutrisync-test",
+    }
+    success_count = 0
+    errors = []
+    for sub in subs:
+        ok, err = reminders.send_web_push(sub, payload)
+        if ok:
+            success_count += 1
+        elif err:
+            errors.append(err)
+
+    if success_count == 0:
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to deliver push notification: " + ("; ".join(errors) if errors else "all deliveries failed"),
+        )
+    return {"status": "sent", "devices": success_count}
+
+
 @app.get("/api/reminders")
 def get_reminders():
     return {"reminders": reminders.list_reminders(), "channels": reminders.channel_status()}
@@ -267,8 +343,14 @@ def add_reminder(payload: ReminderIn):
 
 @app.post("/api/reminders/test-notification")
 def test_reminder_notification():
-    if not (reminders.channel_status()["ntfy"] or reminders.channel_status()["email"]):
-        raise HTTPException(status_code=400, detail="No phone or email channel is set up yet. Add NTFY_TOPIC (phone) or the SMTP settings to backend/.env and restart the backend.")
+    status = reminders.channel_status()
+    has_push = status["push"] and status.get("push_devices", 0) > 0
+    has_email = status["email"]
+    if not (has_push or has_email):
+        raise HTTPException(
+            status_code=400,
+            detail="No notification channel is ready. Enable phone notifications or configure SMTP email in backend/.env.",
+        )
     result = reminders.send_notifications("NutriSync test", "Notifications are working. Your reminders will reach you here.")
     if not result["sent"]:
         raise HTTPException(status_code=502, detail="Sending failed: " + "; ".join(f"{k}: {v}" for k, v in result["errors"].items()))

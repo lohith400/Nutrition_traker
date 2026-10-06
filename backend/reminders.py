@@ -9,7 +9,7 @@ Time-based reminders for food and water.
     for the website, and pushes a notification to your phone / inbox.
 
 Notification channels (all free, all optional, configured in backend/.env):
-  * ntfy.sh  -> real push notification on your phone (NTFY_TOPIC)
+  * Web Push -> native lock-screen push notifications on phone/browser (VAPID)
   * Email    -> any SMTP server, e.g. Gmail with an App Password (SMTP_*)
   * Website  -> the open browser tab polls /api/reminders/events (always on)
 
@@ -17,11 +17,13 @@ Times use the server's local clock (datetime.now()), the same clock the rest of
 NutriSync uses for log dates. Set TZ=Asia/Kolkata for Docker / cloud servers.
 """
 
+import json
+import logging
 import os
 import re
 import smtplib
 import threading
-import urllib.request
+import urllib.parse
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 
@@ -30,6 +32,8 @@ try:
 except ImportError:  # running from inside backend/
     import google_fit, math_engine, memory_agent, rag_resolver
 
+log = logging.getLogger("nutrisync.reminders")
+
 # A reminder that is more than this many minutes late (server was off / asleep)
 # is skipped instead of fired, so restarting at 9pm never logs your breakfast.
 GRACE_MINUTES = int(os.getenv("REMINDER_GRACE_MINUTES", "15"))
@@ -37,6 +41,15 @@ POLL_SECONDS = 15
 
 _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 MEAL_TYPES = ("breakfast", "lunch", "dinner", "snack")
+
+ALLOWED_PUSH_HOSTS = (
+    "fcm.googleapis.com",
+    "push.services.mozilla.com",
+    "web.push.apple.com",
+    "push.apple.com",
+    "notify.windows.com",
+)
+MAX_PUSH_SUBSCRIPTIONS = 10
 
 _reminders_tables_ensured = False
 _reminders_ensure_lock = threading.Lock()
@@ -83,6 +96,18 @@ def _ensure_tables(conn) -> None:
                    channels    TEXT DEFAULT ''
                )"""
         )
+        if type(conn).__name__ != "DummyConn":
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS push_subscriptions (
+                       id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                       endpoint        TEXT NOT NULL UNIQUE,
+                       p256dh          TEXT NOT NULL,
+                       auth            TEXT NOT NULL,
+                       user_agent      TEXT,
+                       created_at      TEXT NOT NULL,
+                       last_success_at TEXT
+                   )"""
+            )
         conn.commit()
         _reminders_tables_ensured = True
 
@@ -94,33 +119,178 @@ def _open():
 
 
 # ---------------------------------------------------------------------------
-# Notification channels
+# Notification channels & Web Push
 # ---------------------------------------------------------------------------
 
+def vapid_public_key() -> str | None:
+    return os.getenv("VAPID_PUBLIC_KEY", "").strip() or None
+
+
+def vapid_configured() -> bool:
+    pub = os.getenv("VAPID_PUBLIC_KEY", "").strip()
+    priv = os.getenv("VAPID_PRIVATE_KEY", "").strip()
+    return bool(pub and priv)
+
+
 def channel_status() -> dict:
+    configured = vapid_configured()
+    push_count = 0
+    try:
+        with _open() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM push_subscriptions")
+            row = cur.fetchone()
+            push_count = row[0] if row else 0
+    except Exception:
+        push_count = 0
     return {
-        "ntfy": bool(os.getenv("NTFY_TOPIC")),
-        "email": bool(os.getenv("SMTP_USER") and os.getenv("SMTP_PASSWORD") and (os.getenv("NOTIFY_EMAIL_TO") or os.getenv("SMTP_USER"))),
+        "push": configured,
+        "push_devices": push_count,
+        "email": bool(
+            os.getenv("SMTP_USER")
+            and os.getenv("SMTP_PASSWORD")
+            and (os.getenv("NOTIFY_EMAIL_TO") or os.getenv("SMTP_USER"))
+        ),
         "browser": True,
     }
 
 
-def _send_ntfy(title: str, body: str) -> None:
-    topic = os.getenv("NTFY_TOPIC", "").strip()
-    server = os.getenv("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
-    req = urllib.request.Request(
-        f"{server}/{topic}",
-        data=body.encode("utf-8"),
-        method="POST",
-        headers={
-            # HTTP headers must be latin-1, so keep the title plain ASCII.
-            "Title": title.encode("ascii", "ignore").decode() or "NutriSync",
-            "Tags": "alarm_clock",
-            "Priority": "default",
+def _validate_subscription(endpoint: str, p256dh: str, auth: str, user_agent: str = "") -> None:
+    if not endpoint or not p256dh or not auth:
+        raise ValueError("endpoint, p256dh, and auth are all required.")
+    if len(endpoint) > 1000:
+        raise ValueError("endpoint URL is too long (max 1000 characters).")
+    if len(p256dh) > 256:
+        raise ValueError("p256dh key is too long (max 256 characters).")
+    if len(auth) > 256:
+        raise ValueError("auth secret is too long (max 256 characters).")
+    if user_agent and len(user_agent) > 500:
+        raise ValueError("user_agent is too long (max 500 characters).")
+    parsed = urllib.parse.urlparse(endpoint)
+    if parsed.scheme.lower() != "https":
+        raise ValueError("Push endpoint must use HTTPS.")
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        raise ValueError("Invalid push endpoint hostname.")
+    if not any(hostname == h or hostname.endswith("." + h) for h in ALLOWED_PUSH_HOSTS):
+        raise ValueError(f"Push endpoint host '{hostname}' is not in the allowlist of known push services.")
+
+
+def save_subscription(endpoint: str, p256dh: str, auth: str, user_agent: str = "") -> dict:
+    _validate_subscription(endpoint, p256dh, auth, user_agent)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _reminders_write_lock:
+        with _open() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+            existing = cur.fetchone()
+            if not existing:
+                cur.execute("SELECT COUNT(*) FROM push_subscriptions")
+                count_row = cur.fetchone()
+                total = count_row[0] if count_row else 0
+                if total >= MAX_PUSH_SUBSCRIPTIONS:
+                    to_remove = total - MAX_PUSH_SUBSCRIPTIONS + 1
+                    cur.execute(
+                        "DELETE FROM push_subscriptions WHERE id IN (SELECT id FROM push_subscriptions ORDER BY created_at ASC, id ASC LIMIT ?)",
+                        (to_remove,),
+                    )
+            cur.execute(
+                """INSERT INTO push_subscriptions (endpoint, p256dh, auth, user_agent, created_at, last_success_at)
+                   VALUES (?, ?, ?, ?, ?, NULL)
+                   ON CONFLICT(endpoint) DO UPDATE SET
+                       p256dh = excluded.p256dh,
+                       auth = excluded.auth,
+                       user_agent = excluded.user_agent,
+                       created_at = excluded.created_at""",
+                (endpoint, p256dh, auth, user_agent or "", now_str),
+            )
+            conn.commit()
+    return {"status": "ok"}
+
+
+def delete_subscription(endpoint: str) -> None:
+    with _reminders_write_lock:
+        with _open() as conn:
+            conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+            conn.commit()
+
+
+def list_subscriptions() -> list:
+    with _open() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, endpoint, p256dh, auth, user_agent, created_at, last_success_at FROM push_subscriptions ORDER BY id ASC"
+        )
+        rows = cur.fetchall()
+        return [
+            {
+                "id": r[0],
+                "endpoint": r[1],
+                "p256dh": r[2],
+                "auth": r[3],
+                "user_agent": r[4],
+                "created_at": r[5],
+                "last_success_at": r[6],
+            }
+            for r in rows
+        ]
+
+
+def send_web_push(subscription_row: dict, payload_dict: dict) -> tuple[bool, str | None]:
+    """Send a Web Push notification to a single subscription.
+
+    On 404 or 410, deletes the subscription.
+    Other errors are reported, never raised. Never logs or returns the private key.
+    Returns (success: bool, error_message: str | None).
+    """
+    private_key = os.getenv("VAPID_PRIVATE_KEY", "").strip()
+    if not private_key:
+        return False, "VAPID_PRIVATE_KEY is not configured"
+
+    endpoint = subscription_row.get("endpoint", "")
+    p256dh = subscription_row.get("p256dh", "")
+    auth = subscription_row.get("auth", "")
+
+    sub_info = {
+        "endpoint": endpoint,
+        "keys": {
+            "p256dh": p256dh,
+            "auth": auth,
         },
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        resp.read()
+    }
+    # Fresh dict per call because pywebpush mutates it
+    vapid_claims = {
+        "sub": os.getenv("VAPID_CLAIM_EMAIL", "mailto:admin@example.com").strip() or "mailto:admin@example.com"
+    }
+
+    try:
+        from pywebpush import webpush
+        webpush(
+            subscription_info=sub_info,
+            data=json.dumps(payload_dict),
+            vapid_private_key=private_key,
+            vapid_claims=vapid_claims,
+            ttl=3600,
+            timeout=10,
+        )
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with _reminders_write_lock:
+            with _open() as conn:
+                conn.execute(
+                    "UPDATE push_subscriptions SET last_success_at = ? WHERE endpoint = ?",
+                    (now_str, endpoint),
+                )
+                conn.commit()
+        return True, None
+    except Exception as exc:
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        if status_code in (404, 410):
+            log.info("Push subscription expired (status %s), removing: %s", status_code, endpoint)
+            delete_subscription(endpoint)
+            return False, f"Subscription expired ({status_code})"
+        err_msg = str(exc)[:200]
+        log.warning("Web push failed for endpoint (%s): %s", endpoint[:60], err_msg)
+        return False, err_msg
 
 
 def _send_email(title: str, body: str) -> None:
@@ -143,15 +313,40 @@ def send_notifications(title: str, body: str) -> dict:
     """Send to every configured channel. Never raises; reports per channel."""
     status = channel_status()
     sent, errors = [], {}
-    for name, fn in (("ntfy", _send_ntfy), ("email", _send_email)):
-        if not status[name]:
-            continue
+
+    # 1. Web Push Channel
+    if status["push"]:
+        subs = list_subscriptions()
+        if subs:
+            payload = {
+                "title": title,
+                "body": body,
+                "url": "/reminders",
+                "tag": "nutrisync-reminder",
+            }
+            success_count = 0
+            push_errors = []
+            for sub in subs:
+                ok, err = send_web_push(sub, payload)
+                if ok:
+                    success_count += 1
+                elif err:
+                    push_errors.append(err)
+            if success_count > 0:
+                sent.append("push")
+            elif push_errors:
+                errors["push"] = "; ".join(push_errors)[:200]
+
+    # 2. Email Channel
+    if status["email"]:
         try:
-            fn(title, body)
-            sent.append(name)
-        except Exception as exc:  # network down, bad credentials, ...
-            errors[name] = str(exc)[:200]
+            _send_email(title, body)
+            sent.append("email")
+        except Exception as exc:
+            errors["email"] = str(exc)[:200]
+
     return {"sent": sent, "errors": errors}
+
 
 
 # ---------------------------------------------------------------------------

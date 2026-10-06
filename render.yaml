@@ -23,7 +23,11 @@ services:
         sync: false
       - key: ACCESS_KEY             # your own long random password for the app
         sync: false
-      - key: NTFY_TOPIC             # optional: phone reminders
+      - key: VAPID_PUBLIC_KEY       # optional: native web push notifications
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_CLAIM_EMAIL
         sync: false
       - key: CORS_ORIGINS           # your Vercel URL, e.g. https://nutrisync.vercel.app
         sync: false

@@ -100,10 +100,19 @@ export default function Shell({ active, crumb, actions, className = "", children
           if (list.length === 0) return;
           setEvents(cur => [...list, ...cur].slice(0, 8));
           setToasts(cur => [...cur, ...list]);
-          list.forEach(e => {
-            window.setTimeout(() => setToasts(cur => cur.filter(t => t.id !== e.id)), 9000);
+          list.forEach(async (e) => {
+            window.setTimeout(() => setToasts((cur) => cur.filter((t) => t.id !== e.id)), 9000);
             if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-              try { new Notification(e.title, { body: e.message }); } catch { /* ignore */ }
+              try {
+                if ("serviceWorker" in navigator) {
+                  const reg = await navigator.serviceWorker.getRegistration();
+                  const sub = await reg?.pushManager.getSubscription();
+                  if (sub) return;
+                }
+                new Notification(e.title, { body: e.message });
+              } catch {
+                /* ignore */
+              }
             }
           });
         })

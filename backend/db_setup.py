@@ -215,6 +215,16 @@ CREATE TABLE IF NOT EXISTS reminder_events (
     channels    TEXT DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    endpoint        TEXT NOT NULL UNIQUE,
+    p256dh          TEXT NOT NULL,
+    auth            TEXT NOT NULL,
+    user_agent      TEXT,
+    created_at      TEXT NOT NULL,
+    last_success_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS grocery_items (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT NOT NULL,
