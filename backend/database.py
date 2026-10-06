@@ -149,7 +149,11 @@ def _is_retryable_statement(sql: str) -> bool:
 
 def _is_retryable_error(exc: Exception) -> bool:
     msg = str(exc).lower()
-    return any(k in msg for k in ("idle for too long", "sqlite_busy", "database is locked", "stream closed", "stream error", "busy"))
+    return any(k in msg for k in (
+        "idle for too long", "sqlite_busy", "database is locked",
+        "stream closed", "stream error", "busy", "connection closed",
+        "http error", "connection reset", "broken pipe", "failed to connect"
+    ))
 
 
 class _Cursor:
