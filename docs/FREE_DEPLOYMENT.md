@@ -82,7 +82,7 @@ HTTPS is automatic, so the mic, camera, location and Web Push notifications work
 ---
 
 ## What to expect (free-tier honesty)
-* **Sleeping:** Render's free service stops after 15 minutes without traffic; the first request afterwards takes about 30-60 seconds. Your data is safe in Turso either way.
+* **Sleeping / cold start:** Render's free service stops after 15 minutes without traffic; the first request afterwards takes about 30-60 seconds. Your data is safe in Turso either way. **Fix (free):** the repo ships `.github/workflows/keep-alive.yml`, which pings `/health` every 10 minutes. Turn it on once: GitHub repo -> Settings -> Secrets and variables -> Actions -> **Variables** -> New repository variable `BACKEND_URL` = `https://<service>.onrender.com`. The web app also wakes the server the moment someone opens the site and shows a friendly "warming up" note while it does. For zero cold starts guaranteed, Render's paid *Starter* plan (about $7/month) never sleeps: change `plan: free` to `plan: starter` in `render.yaml`.
 * **Reminders on Render free:** on Render's free plan the server sleeps after ~15 min idle and reminders only fire while it is awake, so add a free uptime pinger (e.g. UptimeRobot) hitting `https://<service>.onrender.com/health` every 5 minutes; reminders later than `REMINDER_GRACE_MINUTES` (default 15 min) are skipped by design.
 * **Speed:** every database query is now a network call to Turso. If screens feel slow, make sure the Turso location is close to Render's Singapore region.
 * **Timezone on Windows:** Linux/Docker/Render uses `TZ=Asia/Kolkata`. Do NOT set `TZ` in `.env` on Windows; Windows already uses your system clock.

@@ -4,7 +4,7 @@ services:
   - type: web
     name: nutrisync-api
     runtime: docker
-    plan: free
+    plan: free                 # free sleeps after 15 min idle -> use .github/workflows/keep-alive.yml, or switch to `starter` (~$7/mo, never sleeps)
     region: singapore          # closest free region to India
     dockerfilePath: ./backend/Dockerfile
     dockerContext: .
