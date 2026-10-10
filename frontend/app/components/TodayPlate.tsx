@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Flame, Plus, Sparkles, TrendingUp } from "lucide-react";
 import { FoodGlyph } from "./art/FoodGlyph";
+import { useClientNow } from "../hooks/useClientNow";
 
 interface TodayPlateProps {
   consumed: number;
@@ -39,6 +40,7 @@ export function TodayPlate({
   userName,
   onLogClick,
 }: TodayPlateProps) {
+  const now = useClientNow();
   // Count-up display for calories
   const [displayedCal, setDisplayedCal] = useState(0);
 
@@ -95,7 +97,7 @@ export function TodayPlate({
         <div className="almanac-eyebrow">
           <span>ALMANAC DAILY DISPATCH</span>
           <span className="dot-sep">·</span>
-          <span>{new Date().toLocaleDateString("en-IN", { weekday: "short", month: "short", day: "numeric" })}</span>
+          <span suppressHydrationWarning>{now ? now.toLocaleDateString("en-IN", { weekday: "short", month: "short", day: "numeric" }) : "Today"}</span>
         </div>
         <h1 className="almanac-serif">
           {greeting}, <em>{userName}</em>

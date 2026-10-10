@@ -13,6 +13,7 @@ import {
   Leaf,
   Menu,
   MessageCircle,
+  Plus,
   ShoppingCart,
   Sparkles,
   Utensils,
@@ -164,7 +165,7 @@ export default function Shell({ active, crumb, actions, className = "", children
       <aside className={`sidebar ${sidebarOpen ? "mobile-open" : ""}`} aria-label="Main Navigation">
         <div className="brand">
           <span className="brand-badge"><Sparkles size={18} /></span>
-          Nutri<span>Sync</span>
+          <span className="brand-word">Nutri<em>Sync</em></span>
           <button
             type="button"
             className="mobile-drawer-close"
@@ -252,6 +253,16 @@ export default function Shell({ active, crumb, actions, className = "", children
 
           <div className="top-actions">
             {actions}
+            <button
+              type="button"
+              className="qa-trigger"
+              onClick={() => window.dispatchEvent(new Event("nutrisync-quickadd"))}
+              aria-label="Quick add a food (Ctrl+K)"
+            >
+              <Plus size={15} aria-hidden="true" />
+              <span>Quick add</span>
+              <kbd>Ctrl K</kbd>
+            </button>
             <div className="notif-wrap" ref={bellRef}>
               <button className="icon-btn" onClick={() => setBellOpen(open => !open)} aria-label="Notifications" aria-expanded={bellOpen}>
                 <Bell size={18} />

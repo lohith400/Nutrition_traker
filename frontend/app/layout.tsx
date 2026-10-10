@@ -1,28 +1,16 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, DM_Sans, DM_Mono } from "next/font/google";
+import "@fontsource-variable/fraunces";
+import "@fontsource-variable/dm-sans";
+import "@fontsource/dm-mono/400.css";
+import "@fontsource/dm-mono/500.css";
 import "./tokens.css";
 import "./globals.css";
 import "./enhancements.css";
+import "./polish.css";
 import AccessGate from "./components/AccessGate";
-
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  variable: "--font-fraunces",
-  display: "swap",
-});
-
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  variable: "--font-dm-sans",
-  display: "swap",
-});
-
-const dmMono = DM_Mono({
-  weight: ["400", "500"],
-  subsets: ["latin"],
-  variable: "--font-dm-mono",
-  display: "swap",
-});
+import GoalBurst from "./components/GoalBurst";
+import QuickAdd from "./components/QuickAdd";
+import WarmUp from "./components/WarmUp";
 
 export const metadata: Metadata = {
   title: "NutriSync | The Pantry Almanac",
@@ -41,9 +29,12 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${fraunces.variable} ${dmSans.variable} ${dmMono.variable}`}>
+    <html lang="en">
       <body>
         <AccessGate>{children}</AccessGate>
+        <WarmUp />
+        <QuickAdd />
+        <GoalBurst />
       </body>
     </html>
   );
