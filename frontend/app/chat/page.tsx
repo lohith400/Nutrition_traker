@@ -28,6 +28,7 @@ import Shell, { API } from "../components/Shell";
 import { useVoiceChat } from "../hooks/useVoiceChat";
 import { FoodOption, FoodOptionList, MacroChips } from "../components/FoodOptions";
 import { NutritionFacts } from "../components/art/NutritionFacts";
+import { streamChat, toolStatusText } from "../lib/chatStream";
 
 type ToolEvent = { tool: string; args: Record<string, unknown>; result: Record<string, unknown> };
 type ChatMsg = {
@@ -37,6 +38,10 @@ type ChatMsg = {
   created_at?: string;
   pending?: boolean;
   image?: string;
+  /** true while the coach is still writing this reply */
+  streaming?: boolean;
+  /** what the coach is doing right now ("Looking up idli...") */
+  status?: string;
 };
 type Profile = { name?: string; photo_data?: string | null };
 type ChatDay = { date: string; messages: number; preview: string };
@@ -761,7 +766,8 @@ export default function ChatPage() {
   }, [selectedDate, loadDay]);
 
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
+    const busy = messages.some((m) => m.streaming);
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: busy ? "auto" : "smooth" });
   }, [messages, loading]);
 
   /** Sends one message to the coach. Returns the reply text, "" if busy, or null on failure. */
@@ -777,6 +783,7 @@ export default function ChatPage() {
       setMessages((current) => [
         ...current,
         { role: "user", content: clean || "📷 Meal photo", image: image || undefined },
+        { role: "assistant", content: "", streaming: true },
       ]);
       setLoading(true);
       if (image) setIsAnalyzingPhoto(true);
@@ -794,15 +801,42 @@ export default function ChatPage() {
           }
         }
 
-        const response = await fetch(`${API}/api/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: clean, image: image || null, location: where }),
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || "The coach could not reply.");
+        // The reply arrives word by word; text is gathered here and pushed to the screen once per frame.
+        let pending = "";
+        let raf = 0;
+        const patchLast = (fn: (m: ChatMsg) => ChatMsg) =>
+          setMessages((current) => {
+            const i = current.length - 1;
+            if (i < 0 || !current[i].streaming) return current;
+            const next = current.slice();
+            next[i] = fn(current[i]);
+            return next;
+          });
+        const flush = () => {
+          raf = 0;
+          const chunk = pending;
+          pending = "";
+          if (chunk) patchLast((m) => ({ ...m, content: m.content + chunk, status: undefined }));
+        };
+        const data = await streamChat(
+          API,
+          { message: clean, image: image || null, location: where },
+          {
+            onDelta: (text) => {
+              pending += text;
+              if (!raf) raf = requestAnimationFrame(flush);
+            },
+            onReset: () => {
+              pending = "";
+              patchLast((m) => ({ ...m, content: "" }));
+            },
+            onTool: (t) =>
+              patchLast((m) => ({ ...m, status: t.phase === "start" ? toolStatusText(t.name, t.args) : m.status })),
+          }
+        );
+        if (raf) cancelAnimationFrame(raf);
         setMessages((current) => [
-          ...current,
+          ...current.filter((m) => !m.streaming),
           { role: "assistant", content: data.reply, tool_events: data.tool_events || [] },
         ]);
         loadDays();
@@ -810,7 +844,7 @@ export default function ChatPage() {
       } catch (err) {
         setError(err instanceof Error ? err.message : "The coach is unavailable. Check your API key and backend.");
         setMessages((current) => [
-          ...current,
+          ...current.filter((m) => !m.streaming),
           { role: "assistant", content: "Sorry, I couldn't process that just now. Please try again." },
         ]);
         return null;
@@ -1045,6 +1079,20 @@ export default function ChatPage() {
                 ) : (
                   <p>No conversation recorded on this day.</p>
                 )}
+                {isToday && (
+                  <div className="chat-suggestions" role="group" aria-label="Try asking">
+                    {[
+                      "I had 2 idlis and a chai for breakfast",
+                      "How am I doing today?",
+                      "What should I eat for dinner?",
+                      "Log a glass of water",
+                    ].map((q) => (
+                      <button key={q} type="button" className="chat-chip" onClick={() => void sendText(q)} disabled={loading}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {messages.map((message, index) => {
@@ -1068,7 +1116,14 @@ export default function ChatPage() {
                     )}
                   </div>
                   <div className="chat-bubble-col">
-                    <div className={`chat-bubble ${message.role}`}>
+                    <div className={`chat-bubble ${message.role}${message.streaming && !message.content ? " typing" : ""}`}>
+                      {message.streaming && !message.content && (
+                        <>
+                          <span className="typing-dot" />
+                          <span className="typing-dot" />
+                          <span className="typing-dot" />
+                        </>
+                      )}
                       {message.image && (
                         <div
                           className={`chat-photo-wrap ${
@@ -1079,7 +1134,14 @@ export default function ChatPage() {
                         </div>
                       )}
                       {message.content}
+                      {message.streaming && message.content && <span className="stream-caret" aria-hidden="true" />}
                     </div>
+                    {message.streaming && message.status && (
+                      <div className="stream-status" role="status">
+                        <span className="stream-status-dot" aria-hidden="true" />
+                        {message.status}
+                      </div>
+                    )}
                     {message.tool_events && message.tool_events.length > 0 && (
                       <div className="tool-card-stack">
                         {message.tool_events.map((event, eventIndex) => (
@@ -1100,7 +1162,7 @@ export default function ChatPage() {
                 </div>
               );
             })}
-            {loading && (
+            {loading && !messages.some((m) => m.streaming) && (
               <div className="chat-row assistant">
                 <div className="chat-avatar coach-av">
                   <Sparkles size={14} />
@@ -1250,14 +1312,14 @@ export default function ChatPage() {
                 disabled={loading}
               />
               <button className="primary-btn active:scale-95 transition-transform duration-150" disabled={loading || (!input.trim() && !pendingImage)}>
-                <Send size={16} /> Send
+                <Send size={16} /> <span className="send-label">Send</span>
               </button>
             </form>
           )}
         </div>
       </div>
 
-      <style>{`
+      <style dangerouslySetInnerHTML={{ __html: `
         /* Retro Ambient Nutrition Motifs */
         .chat-main .chat-panel {
           position: relative;
@@ -1493,7 +1555,7 @@ export default function ChatPage() {
             transform: none !important;
           }
         }
-      `}</style>
+      ` }} />
     </Shell>
   );
 }

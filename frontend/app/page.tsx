@@ -19,6 +19,10 @@ import {
   Zap,
 } from "lucide-react";
 import Shell from "./components/Shell";
+import { useClientNow } from "./hooks/useClientNow";
+import { CountUp } from "./components/CountUp";
+import { celebrate } from "./components/GoalBurst";
+import { DATA_CHANGED } from "./components/QuickAdd";
 import { FoodOption, FoodOptionList } from "./components/FoodOptions";
 import { TodayPlate } from "./components/TodayPlate";
 import { HydrationJar } from "./components/HydrationJar";
@@ -124,8 +128,9 @@ type FitnessSummary = {
   message?: string;
 };
 
-function timeGreeting(): string {
-  const hour = new Date().getHours();
+function timeGreeting(now: Date | null): string {
+  if (!now) return "Welcome";  // same text on the server and on the first browser render (no hydration mismatch)
+  const hour = now.getHours();
   if (hour < 5) return "Still up";
   if (hour < 12) return "Good morning";
   if (hour < 17) return "Good afternoon";
@@ -144,6 +149,7 @@ function Stat({
   unit,
   color,
   Icon,
+  ready = true,
 }: {
   label: string;
   value: number;
@@ -151,10 +157,17 @@ function Stat({
   unit: string;
   color: string;
   Icon: typeof Flame;
+  ready?: boolean;
 }) {
   const percent = goal ? Math.min(100, (value / goal) * 100) : 0;
+  // the bar starts empty and fills in, so the card feels alive when it first appears
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setArmed(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
   return (
-    <div className="stat-card">
+    <div className={`stat-card${ready ? "" : " is-loading"}`} aria-busy={!ready}>
       <div className="stat-topline">
         <span className={`stat-icon ${color}`}>
           <Icon size={17} />
@@ -163,11 +176,11 @@ function Stat({
         <span className="stat-more">···</span>
       </div>
       <div className="stat-number">
-        <span className="stat-value tabular">{fmt(value)}</span>
+        <span className="stat-value tabular"><CountUp value={value} /></span>
         <small className="almanac-mono">{unit}</small>
       </div>
       <div className="progress-track">
-        <span className={`progress-fill ${color}`} style={{ width: `${percent}%` }} />
+        <span className={`progress-fill ${color}`} style={{ width: armed ? `${percent}%` : "0%" }} />
       </div>
       <div className="stat-meta">
         <span className="tabular">{Math.round(percent)}% of target</span>
@@ -298,6 +311,17 @@ export default function Page() {
     refresh().catch(() => setNotice("Backend unavailable. Start FastAPI on port 8000."));
   }, []);
 
+  // Quick-add (Ctrl+K) logs from anywhere; reload the numbers when it does.
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  useEffect(() => {
+    const on = () => {
+      refreshRef.current().catch(() => {});
+    };
+    window.addEventListener(DATA_CHANGED, on);
+    return () => window.removeEventListener(DATA_CHANGED, on);
+  }, []);
+
   async function removeMeal(id: number) {
     try {
       const response = await fetch(`${API}/api/log/${id}`, { method: "DELETE" });
@@ -354,7 +378,30 @@ export default function Page() {
   const carbs = budget?.consumed_carbs_g || 0;
   const fat = budget?.consumed_fat_g || 0;
   const water = budget?.consumed_water_l || 0;
-  const greeting = timeGreeting();
+  const greeting = timeGreeting(useClientNow());
+
+  // A small celebration the moment a daily goal is crossed (never on page load, once per goal per day).
+  const lastSeen = useRef<{ protein: number | null; water: number | null }>({ protein: null, water: null });
+  useEffect(() => {
+    if (!budget) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const check = (key: "protein" | "water", value: number, target: number, label: string) => {
+      if (!target) return;
+      const before = lastSeen.current[key];
+      lastSeen.current[key] = value;
+      if (before === null || before >= target || value < target) return;
+      try {
+        const flag = `ns_goal_${key}_${today}`;
+        if (localStorage.getItem(flag)) return;
+        localStorage.setItem(flag, "1");
+      } catch {
+        /* private mode: celebrate anyway */
+      }
+      celebrate(label);
+    };
+    check("protein", protein, budget.target_protein_g || 0, "Protein goal reached. Well fed!");
+    check("water", water, budget.target_water_l || 0, "Hydration goal reached. Cheers!");
+  }, [budget, protein, water]);
 
   return (
     <Shell active="overview" crumb="Overview">
@@ -433,6 +480,7 @@ export default function Page() {
             unit=" kcal"
             color="coral"
             Icon={Flame}
+            ready={!!budget}
           />
           <Stat
             label="Protein"
@@ -441,6 +489,7 @@ export default function Page() {
             unit="g"
             color="blue"
             Icon={Target}
+            ready={!!budget}
           />
           <Stat
             label="Carbohydrates"
@@ -449,6 +498,7 @@ export default function Page() {
             unit="g"
             color="yellow"
             Icon={Zap}
+            ready={!!budget}
           />
           <Stat
             label="Fats"
@@ -457,6 +507,7 @@ export default function Page() {
             unit="g"
             color="coral"
             Icon={Target}
+            ready={!!budget}
           />
         </div>
 

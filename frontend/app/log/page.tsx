@@ -246,7 +246,8 @@ export default function LogPage() {
     const onVisible = () => { if (document.visibilityState === "visible") load(); };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
-    return () => { document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", onVisible); };
+    window.addEventListener("nutrisync-data-changed", load);  // logged from the quick-add (Ctrl+K)
+    return () => { document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", onVisible); window.removeEventListener("nutrisync-data-changed", load); };
   }, [load]);
 
   const calorieTarget = profile?.target_calories || 0;
