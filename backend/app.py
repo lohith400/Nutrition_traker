@@ -1,4 +1,6 @@
 """NutriSync HTTP API."""
+import asyncio
+import json
 import os
 
 if os.name == "nt":
@@ -14,7 +16,7 @@ from typing import Literal
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 DIR = Path(__file__).resolve().parent
@@ -30,9 +32,9 @@ for p in (DIR, ROOT):
         sys.path.insert(0, str(p))
 
 try:
-    from backend import custom_foods, db_setup, energy_insights, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
+    from backend import custom_foods, db_setup, energy_insights, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, perf, rag_resolver, reminders  # noqa: E402
 except ImportError:
-    import custom_foods, db_setup, energy_insights, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, rag_resolver, reminders  # noqa: E402
+    import custom_foods, db_setup, energy_insights, google_fit, grocery, math_engine, memory_agent, menu_planner, orchestrator, perf, rag_resolver, reminders  # noqa: E402
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -42,11 +44,17 @@ async def lifespan(_app):
     except Exception as exc:
         import logging
         logging.getLogger("uvicorn.error").warning("db_setup.ensure_schema at startup: %s", exc)
-    try:
-        await google_fit.sync_today_fitness()
-    except Exception as exc:
-        import logging
-        logging.getLogger("uvicorn.error").warning("google_fit.sync_today_fitness at startup: %s", exc)
+    # Neither of these should delay the server becoming ready (important after a cold start):
+    # the Google Fit sync runs as a background task, and the food-search index is built on a worker thread.
+    async def _sync_fit():
+        try:
+            await google_fit.sync_today_fitness()
+        except Exception as exc:
+            import logging
+            logging.getLogger("uvicorn.error").warning("google_fit.sync_today_fitness at startup: %s", exc)
+
+    _app.state.fit_task = asyncio.create_task(_sync_fit())
+    perf.background(rag_resolver.warm_index, "warm_index")
     # Background thread that fires food/water reminders when they are due.
     reminders.start_scheduler()
     try:
@@ -187,7 +195,7 @@ def get_overview():
     budget["remaining_water_l"] = round((budget.get("target_water_l") or 0) - water["consumed_water_l"], 2)
     # Long-term memory runs here automatically: at most once every 10 minutes,
     # so the coach's context has fresh findings without creating DB write contention.
-    memory_agent.maybe_detect_patterns(force=False)
+    memory_agent.maybe_detect_patterns_background()
     budget["patterns"] = memory_agent.get_active_patterns()["patterns"]
     return budget
 
@@ -502,13 +510,10 @@ def clear_chat_history(date: str | None = None):
     return memory_agent.clear_chat_history(date or datetime.now().strftime("%Y-%m-%d"))
 
 
-@app.post("/api/chat")
-def chat(payload: ChatRequest):
+def _chat_inputs(payload: ChatRequest):
+    """Validate a chat request. Returns (text, image, text_to_save_in_history)."""
     if orchestrator.client is None:
         raise HTTPException(status_code=503, detail="AI coach is not configured. Create backend/.env and set ONE of OPENROUTER_API_KEY, GEMINI_API_KEY or DEEPSEEK_API_KEY.")
-    # The last N turns (default 20, across days) are loaded from the database on every request,
-    # so the coach keeps its context after refreshes, restarts and at midnight.
-    history = memory_agent.get_recent_history(limit=CHAT_CONTEXT_MESSAGES)
     text = (payload.message or "").strip()
     image = payload.image
     if image and not image.startswith(("data:image/jpeg;base64,", "data:image/png;base64,", "data:image/webp;base64,")):
@@ -517,14 +522,72 @@ def chat(payload: ChatRequest):
         raise HTTPException(status_code=422, detail="Send a message or a meal photo.")
     # The photo itself is not stored in chat history (keeps the database small);
     # a marker is saved so the transcript still shows a photo was sent.
-    saved = f"📷 [Meal photo] {text}".strip() if image else text
-    memory_agent.save_chat_message("user", saved)
+    return text, image, (f"📷 [Meal photo] {text}".strip() if image else text)
+
+
+def _chat_prepare(saved: str):
+    """Load the transcript and the live context at the same time, then store the user's message
+    while the model is thinking (it is joined before the reply is stored, so order is preserved)."""
+    # The last N turns (default 20, across days) are loaded from the database on every request,
+    # so the coach keeps its context after refreshes, restarts and at midnight.
+    history, context = perf.parallel(lambda: memory_agent.get_recent_history(limit=CHAT_CONTEXT_MESSAGES), orchestrator._context)
+    return history, context, perf.submit(lambda: memory_agent.save_chat_message("user", saved))
+
+
+def _chat_finish(reply: str, tool_events: list, saved_user) -> dict:
+    """Store the reply and build the screen refresh data (all three reads/writes run together)."""
+    saved_user.result()
+    _, overview, meals = perf.parallel(
+        lambda: memory_agent.save_chat_message("assistant", reply, tool_events),
+        get_overview,
+        memory_agent.get_todays_logs,
+    )
+    return {"reply": reply, "tool_events": tool_events, "overview": overview, "recent_meals": meals}
+
+
+@app.post("/api/chat")
+def chat(payload: ChatRequest):
+    text, image, saved = _chat_inputs(payload)
+    history, context, saved_user = _chat_prepare(saved)
     try:
-        result = orchestrator.chat_with_tools(text, history, image=image, location=payload.location)
+        result = orchestrator.chat_with_tools(text, history, image=image, location=payload.location, context=context)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Coach provider error: {exc}") from exc
-    memory_agent.save_chat_message("assistant", result["reply"], result.get("tool_events"))
-    return {"reply": result["reply"], "tool_events": result.get("tool_events", []), "overview": get_overview(), "recent_meals": memory_agent.get_todays_logs()}
+    return _chat_finish(result["reply"], result.get("tool_events", []), saved_user)
+
+
+def _ndjson(event: dict) -> bytes:
+    return (json.dumps(event, default=str) + "\n").encode("utf-8")
+
+
+@app.post("/api/chat/stream")
+def chat_stream(payload: ChatRequest):
+    """Same coach as /api/chat, but the answer is streamed as newline-delimited JSON events so the
+    screen fills in while the model is still writing:  start -> (tool_start/tool_end)* -> delta* -> done.
+    On a failure mid-way an {"type": "error"} event is sent. /api/chat stays available as the plain fallback."""
+    text, image, saved = _chat_inputs(payload)  # bad requests still get a normal 4xx before streaming starts
+
+    def events():
+        yield _ndjson({"type": "start"})
+        try:
+            history, context, saved_user = _chat_prepare(saved)
+            final = None
+            for ev in orchestrator.chat_with_tools_stream(text, history, image=image, location=payload.location, context=context):
+                if ev["type"] == "final":
+                    final = ev
+                else:
+                    yield _ndjson(ev)
+            if final is None:
+                raise RuntimeError("the coach returned no reply")
+            yield _ndjson({"type": "done", **_chat_finish(final["reply"], final["tool_events"], saved_user)})
+        except Exception as exc:  # noqa: BLE001
+            yield _ndjson({"type": "error", "detail": f"Coach provider error: {exc}"})
+
+    return StreamingResponse(
+        events(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
 
 
 # ---------------------------------------------------------------------------
