@@ -14,6 +14,8 @@ code base keeps using sqlite3-style calls unchanged.
 import os
 import re
 import sqlite3
+import threading
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -131,8 +133,6 @@ def split_statements(script: str) -> list:
     return statements
 
 
-import time
-
 
 def _is_retryable_statement(sql: str) -> bool:
     s = (sql or "").strip()
@@ -222,9 +222,10 @@ class _Cursor:
 class LibsqlConnection:
     """sqlite3.Connection look-alike around a libsql connection."""
 
-    def __init__(self, raw, opener=None):
+    def __init__(self, raw, opener=None, pool_key=None):
         self._raw = raw
         self._opener = opener
+        self._pool_key = pool_key  # set when this connection came from the per-thread pool
         self.row_factory = None
 
     def reopen_if_needed(self):
@@ -267,6 +268,9 @@ class LibsqlConnection:
 
     def close(self):
         self.rollback()
+        if self._pool_key is not None:
+            _release(self._pool_key, self._raw)  # keep it open for the next query on this thread
+            return
         try:
             self._raw.close()
         except Exception:
@@ -284,16 +288,84 @@ class LibsqlConnection:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Per-thread connection reuse (remote Turso only)
+#
+# Opening a Turso connection costs a network round trip, and one chat message used to open
+# 20+ of them back to back. Each worker thread now keeps ONE open connection and reuses it for
+# the next query. Safety rules:
+#   * a connection idle for longer than NUTRISYNC_DB_POOL_IDLE seconds (default 3) is closed and
+#     reopened, because Turso expires idle streams after a few seconds;
+#   * if the thread's connection is already checked out (a function that holds a connection
+#     calls another that wants one), the second caller gets its own fresh connection, so one
+#     caller's rollback can never undo another caller's pending write;
+#   * NUTRISYNC_DB_POOL=0 switches the whole thing off.
+# ---------------------------------------------------------------------------
+_tls = threading.local()
+
+
+def pool_enabled() -> bool:
+    return os.getenv("NUTRISYNC_DB_POOL", "1").strip() != "0"
+
+
+def _pool_idle_secs() -> float:
+    try:
+        return float(os.getenv("NUTRISYNC_DB_POOL_IDLE", "3"))
+    except ValueError:
+        return 3.0
+
+
+def _slots() -> dict:
+    slots = getattr(_tls, "slots", None)
+    if slots is None:
+        slots = _tls.slots = {}
+    return slots
+
+
+def _checkout(key, opener):
+    """Returns (raw_connection, pooled?). pooled? is False when a fresh one-off connection was made."""
+    slot = _slots().get(key)
+    if slot is not None and slot["busy"]:
+        return opener(), False
+    now = time.monotonic()
+    if slot is not None and now - slot["used"] <= _pool_idle_secs():
+        slot["busy"] = True
+        return slot["raw"], True
+    if slot is not None:
+        try:
+            slot["raw"].close()
+        except Exception:
+            pass
+    raw = opener()
+    _slots()[key] = {"raw": raw, "used": now, "busy": True}
+    return raw, True
+
+
+def _release(key, raw):
+    slot = _slots().get(key)
+    if slot is not None:
+        slot["raw"] = raw  # reopen_if_needed() may have swapped it
+        slot["used"] = time.monotonic()
+        slot["busy"] = False
+
+
+def _open_libsql(key, opener):
+    if not pool_enabled():
+        return LibsqlConnection(opener(), opener=opener)
+    raw, pooled = _checkout(key, opener)
+    return LibsqlConnection(raw, opener=opener, pool_key=key if pooled else None)
+
+
 def get_db_connection(path=None):
     """Open the database. `path` is only used for the local SQLite fallback."""
     target_path = path or os.getenv("NUTRISYNC_DB_PATH") or DEFAULT_DB_PATH
     if os.getenv("NUTRISYNC_FORCE_LIBSQL") == "1":  # test hook: exercise the wrapper on a local file
         opener = lambda: _import_libsql().connect(target_path)
-        return LibsqlConnection(opener(), opener=opener)
+        return _open_libsql(("file", target_path, id(_import_libsql())), opener)
     if turso_enabled():
-        opener = lambda: _import_libsql().connect(_env("TURSO_DATABASE_URL"), auth_token=_env("TURSO_AUTH_TOKEN"))
-        return LibsqlConnection(opener(), opener=opener)
+        url = _env("TURSO_DATABASE_URL")
+        opener = lambda: _import_libsql().connect(url, auth_token=_env("TURSO_AUTH_TOKEN"))
+        return _open_libsql(("turso", url, id(_import_libsql())), opener)
     conn = sqlite3.connect(target_path)
     conn.row_factory = sqlite3.Row
     return conn
-

@@ -26,11 +26,13 @@ except ImportError:  # run from inside backend/
     from database import get_db_connection
 import os
 import difflib
+import time
 
 try:
-    from backend import food_quality
+    from backend import food_quality, perf
 except ImportError:
     import food_quality
+    import perf
 
 _DEFAULT_DB = (
     os.path.join(os.path.dirname(__file__), "..", "nutrisync.db")
@@ -257,12 +259,27 @@ def _name_variants(name: str) -> list:
     return out
 
 
+_INDEX_RECHECK_SECS = 300  # food_items is seed data; on the remote DB don't even COUNT() it on every search
+
+
+def warm_index() -> None:
+    """Build the search index now (called once in the background at startup) so the first search is instant."""
+    try:
+        _load_index()
+    except Exception:  # noqa: BLE001 -- warming is best-effort
+        pass
+
+
 def _load_index():
+    if (perf.cache_enabled() and _index_cache["key"] and _index_cache["key"][0] == DB_PATH
+            and time.monotonic() - _index_cache.get("checked", 0) < _INDEX_RECHECK_SECS):
+        return _index_cache["rows"]
     conn = _get_conn()
     try:
         count = conn.execute("SELECT COUNT(*) FROM food_items").fetchone()[0]
         key = (DB_PATH, count)
         if _index_cache["key"] == key:
+            _index_cache["checked"] = time.monotonic()
             return _index_cache["rows"]
         rows = conn.execute(
             "SELECT food_code, food_name, quality, quality_note, diet_tag, serving_grams, servings_unit, "
@@ -279,7 +296,7 @@ def _load_index():
         d["_variants"] = [{_canon(w) for w in v} for v in _name_variants(d["food_name"])]
         d["_variants"].append({_canon(w) for w in _words(d["food_name"])})  # the whole name, as the coach quotes it back
         parsed.append(d)
-    _index_cache.update(key=key, rows=parsed)
+    _index_cache.update(key=key, rows=parsed, checked=time.monotonic())
     return parsed
 
 

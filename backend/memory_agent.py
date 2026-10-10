@@ -25,8 +25,10 @@ import time
 from datetime import datetime, timedelta
 
 try:
+    from backend import perf
     from backend.database import get_db_connection
 except ImportError:  # run from inside backend/
+    import perf
     from database import get_db_connection
 
 _logger = logging.getLogger(__name__)
@@ -100,6 +102,7 @@ def save_user_profile(profile: dict) -> dict:
             profile,
         )
         conn.commit()
+        perf.invalidate(prefix="profile")
         return {"status": "saved"}
     except Exception:
         conn.rollback()
@@ -114,6 +117,7 @@ def update_profile_photo(photo_data: str | None) -> dict:
         _ensure_profile_photo_column(conn)
         conn.execute("UPDATE user_profile SET photo_data = ? WHERE id = 1", (photo_data,))
         conn.commit()
+        perf.invalidate(prefix="profile")
         return {"status": "ok", "photo_data": photo_data}
     except Exception:
         conn.rollback()
@@ -122,7 +126,7 @@ def update_profile_photo(photo_data: str | None) -> dict:
         conn.close()
 
 
-def get_user_profile() -> dict:
+def _load_user_profile() -> dict:
     conn = _get_conn()
     try:
         row = conn.execute("SELECT * FROM user_profile WHERE id = 1").fetchone()
@@ -131,6 +135,11 @@ def get_user_profile() -> dict:
         return dict(row)
     finally:
         conn.close()
+
+
+def get_user_profile() -> dict:
+    # Cached for a few seconds on the remote database; save_user_profile() / update_profile_photo() clear it.
+    return perf.cached(("profile", DB_PATH), _load_user_profile)
 
 
 def get_user_diet() -> str:
@@ -442,7 +451,7 @@ def _deactivate_pattern(conn, pattern_type: str) -> None:
     conn.execute("UPDATE detected_patterns SET still_active = 0 WHERE pattern_type = ?", (pattern_type,))
 
 
-def detect_patterns() -> dict:
+def _detect_patterns_impl() -> dict:
     """
     Looks across the last 7-14 days of logs and checks for recurring
     issues and habits. This is what turns the system from "a calculator
@@ -562,6 +571,38 @@ def detect_patterns() -> dict:
             conn.close()
 
 
+def detect_patterns() -> dict:
+    try:
+        return _detect_patterns_impl()
+    finally:
+        perf.invalidate(prefix="patterns")
+
+
+_detecting = threading.Event()
+
+
+def maybe_detect_patterns_background() -> None:
+    """Same throttle as maybe_detect_patterns(), but never makes the caller wait.
+
+    The (rare, 10-minute) detection runs after the reply instead of before it; the coach simply
+    sees the previous findings this once. Falls back to the synchronous version on a plain local
+    database, where it costs next to nothing and tests expect fresh results."""
+    if not perf.cache_enabled():
+        maybe_detect_patterns(force=False)
+        return
+    if time.time() - _last_patterns_detection_ts < 600 or _detecting.is_set():
+        return
+    _detecting.set()
+
+    def run():
+        try:
+            maybe_detect_patterns(force=True)
+        finally:
+            _detecting.clear()
+
+    perf.background(run, "detect_patterns")
+
+
 def maybe_detect_patterns(force: bool = False) -> dict:
     """Run detect_patterns at most once every 10 minutes unless force=True (e.g. after logging a meal).
     Wrapped in try/except so failures only log a warning and do not raise."""
@@ -578,7 +619,7 @@ def maybe_detect_patterns(force: bool = False) -> dict:
         return {"status": "failed", "error": str(exc)}
 
 
-def get_active_patterns() -> dict:
+def _load_active_patterns() -> dict:
     conn = _get_conn()
     try:
         rows = conn.execute(
@@ -588,6 +629,10 @@ def get_active_patterns() -> dict:
         return {"patterns": [dict(r) for r in rows]}
     finally:
         conn.close()
+
+
+def get_active_patterns() -> dict:
+    return perf.cached(("patterns", DB_PATH), _load_active_patterns)
 
 
 # ---------- Long-term memory: food preferences ----------
@@ -617,6 +662,7 @@ def set_user_fact(key: str, value: str) -> dict:
             (key, value, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
         )
         conn.commit()
+        perf.invalidate(prefix="facts")
         return {"status": "saved"}
     except Exception:
         conn.rollback()
@@ -625,13 +671,17 @@ def set_user_fact(key: str, value: str) -> dict:
         conn.close()
 
 
-def get_user_facts() -> dict:
+def _load_user_facts() -> dict:
     conn = _get_conn()
     try:
         rows = conn.execute("SELECT fact_key, fact_value, updated_at FROM user_facts").fetchall()
         return {r["fact_key"]: r["fact_value"] for r in rows}
     finally:
         conn.close()
+
+
+def get_user_facts() -> dict:
+    return perf.cached(("facts", DB_PATH), _load_user_facts)
 
 
 # ---------- Coach chat history ----------

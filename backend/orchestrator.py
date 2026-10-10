@@ -11,9 +11,9 @@ import re
 from datetime import datetime
 
 try:
-    from backend import custom_foods, google_fit, grocery, llm_config, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
+    from backend import custom_foods, google_fit, grocery, llm_config, math_engine, memory_agent, menu_planner, perf, places_finder, rag_resolver, reminders
 except ImportError:
-    import custom_foods, google_fit, grocery, llm_config, math_engine, memory_agent, menu_planner, places_finder, rag_resolver, reminders
+    import custom_foods, google_fit, grocery, llm_config, math_engine, memory_agent, menu_planner, perf, places_finder, rag_resolver, reminders
 
 # Primary provider: Google AI Studio (Gemini) with zero-crash cascade; fallback: OpenRouter, DeepSeek.
 client, MODEL, PROVIDER = llm_config.build_client()
@@ -96,15 +96,19 @@ def _last_log_error(events: list) -> str:
 
 
 def _context():
+    """Everything the coach needs to know right now. The independent reads run at the same time
+    (each is a network round trip on the remote database), and the 10-minute pattern detection is
+    kicked off in the background instead of delaying the reply."""
     today = datetime.now().strftime("%Y-%m-%d")
-    profile = memory_agent.get_user_profile()
-    budget = math_engine.get_remaining_budget_today(today)
-    meals = memory_agent.get_todays_logs()
-    # Long-term memory: check patterns with throttle (at most once every 10 min)
-    memory_agent.maybe_detect_patterns(force=False)
-    patterns = memory_agent.get_active_patterns()["patterns"]
-    facts = memory_agent.get_user_facts()
-    today_fitness = google_fit.get_today_stored_fitness(today)
+    memory_agent.maybe_detect_patterns_background()
+    profile, budget, meals, patterns, facts, today_fitness = perf.parallel(
+        memory_agent.get_user_profile,
+        lambda: math_engine.get_remaining_budget_today(today),
+        memory_agent.get_todays_logs,
+        lambda: memory_agent.get_active_patterns()["patterns"],
+        memory_agent.get_user_facts,
+        lambda: google_fit.get_today_stored_fitness(today),
+    )
     return {
         "profile": profile,
         "budget": budget,
@@ -727,6 +731,11 @@ TOOL_IMPL = {
 
 MAX_TOOL_ROUNDS = 5
 
+_LOG_NUDGE = (
+    "Your last reply says a food was logged, but log_food has not succeeded in this turn, so nothing "
+    "was saved. If the user confirmed logging, call log_food (or add_grocery_items for groceries) now using the details from the conversation. Otherwise reply again WITHOUT claiming anything was logged."
+)
+
 
 def _tool_call_dict(tc) -> dict:
     """Assistant tool call as sent back to the API. Newer Gemini models attach an opaque
@@ -738,19 +747,11 @@ def _tool_call_dict(tc) -> dict:
     return entry
 
 
-def chat_with_tools(user_message: str, history: list | None = None, image: str | None = None,
-                    location: dict | None = None) -> dict:
-    """Runs a bounded tool-calling loop against the configured LLM provider.
-
-    `history` is the prior turns as stored by memory_agent.get_chat_history()
-    (role/content dicts). Returns {"reply": str, "tool_events": [...]}, where
-    tool_events records every tool call + result made during this turn so the
-    frontend can render a "found in database" / "logged" card inline.
-    """
-    if client is None:
-        raise RuntimeError("No AI key configured (set OPENROUTER_API_KEY, GEMINI_API_KEY or DEEPSEEK_API_KEY)")
-
-    context = _context()
+def _prepare_messages(user_message: str, history: list | None = None, image: str | None = None,
+                      context: dict | None = None) -> list:
+    """System prompt + live context + earlier turns + the new user turn, ready to send to the model."""
+    if context is None:
+        context = _context()
     system = (
         "You are NutriSync India, a warm, concise Indian nutrition coach chatting inline in an app.\n"
         "Whenever the user mentions eating or drinking something, ALWAYS call lookup_food first to get "
@@ -863,7 +864,22 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
         ]})
     else:
         messages.append({"role": "user", "content": user_message})
+    return messages
 
+
+def chat_with_tools(user_message: str, history: list | None = None, image: str | None = None,
+                    location: dict | None = None, context: dict | None = None) -> dict:
+    """Runs a bounded tool-calling loop against the configured LLM provider.
+
+    `history` is the prior turns as stored by memory_agent.get_chat_history()
+    (role/content dicts). Returns {"reply": str, "tool_events": [...]}, where
+    tool_events records every tool call + result made during this turn so the
+    frontend can render a "found in database" / "logged" card inline.
+    """
+    if client is None:
+        raise RuntimeError("No AI key configured (set OPENROUTER_API_KEY, GEMINI_API_KEY or DEEPSEEK_API_KEY)")
+
+    messages = _prepare_messages(user_message, history, image, context)
     tool_events = []
     nudged = False
     for _ in range(MAX_TOOL_ROUNDS + 1):
@@ -884,9 +900,7 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
                     # Ask the model to actually call log_food (or retract the claim).
                     nudged = True
                     messages.append({"role": "assistant", "content": reply})
-                    messages.append({"role": "system", "content": (
-                        "Your last reply says a food was logged, but log_food has not succeeded in this turn, so nothing "
-                        "was saved. If the user confirmed logging, call log_food (or add_grocery_items for groceries) now using the details from the conversation. Otherwise reply again WITHOUT claiming anything was logged.")})
+                    messages.append({"role": "system", "content": _LOG_NUDGE})
                     continue
                 error = _last_log_error(tool_events)
                 reply = ("I couldn't save that to your food log" + (f" ({error})" if error else "") +
@@ -917,6 +931,164 @@ def chat_with_tools(user_message: str, history: list | None = None, image: str |
         "reply": "I ran into trouble figuring that out -- could you rephrase what you ate?",
         "tool_events": tool_events,
     }
+
+
+# ---------------------------------------------------------------------------------------------
+# Streaming version of the coach loop
+#
+# Exactly the same rules as chat_with_tools() (same prompt, same tools, same "never claim a food
+# was logged unless log_food succeeded" guard) -- the only difference is that the final answer is
+# handed to the caller word by word as the model writes it, so the screen starts filling after
+# ~1 second instead of staying blank until the whole reply is finished.
+#
+# Events yielded (plain dicts):
+#   {"type": "tool_start", "name", "args"}   a tool is about to run (UI shows "Looking up idli...")
+#   {"type": "tool_end",   "name", "status"} that tool finished
+#   {"type": "delta",      "text"}           more reply text
+#   {"type": "reset"}                        discard the reply text shown so far (the guard is retrying)
+#   {"type": "final",      "reply", "tool_events"}
+# ---------------------------------------------------------------------------------------------
+class _ToolCall:
+    """Stands in for the SDK's tool-call object so _tool_call_dict() works on streamed pieces."""
+
+    def __init__(self, call_id: str):
+        self.id = call_id
+        self.function = type("Fn", (), {"name": "", "arguments": ""})()
+        self.model_extra: dict = {}
+
+
+def _stream_round(messages: list):
+    """One model call. Yields ("delta", text) while it writes, then ("end", content, tool_calls)."""
+    content_parts: list[str] = []
+    calls: list[_ToolCall] = []
+    by_index: dict = {}
+    emitted = False
+    try:
+        stream = llm_config.create_completion(
+            client, model=MODEL, messages=messages, tools=TOOLS, tool_choice="auto", temperature=0.3, stream=True,
+        )
+        for chunk in stream:
+            if not getattr(chunk, "choices", None):
+                continue
+            delta = chunk.choices[0].delta
+            text = getattr(delta, "content", None)
+            if text:
+                content_parts.append(text)
+                emitted = True
+                yield ("delta", text)
+            for tc in (getattr(delta, "tool_calls", None) or []):
+                idx = getattr(tc, "index", None)
+                tid = getattr(tc, "id", None)
+                slot = by_index.get(idx) if idx is not None else None
+                # Some providers (Gemini's OpenAI layer) reuse index 0 for every call: a new id means a new call.
+                if slot is not None and tid and slot.id and tid != slot.id:
+                    slot = None
+                if slot is None:
+                    slot = _ToolCall(tid or f"call_{len(calls)}")
+                    calls.append(slot)
+                    if idx is not None:
+                        by_index[idx] = slot
+                fn = getattr(tc, "function", None)
+                if fn is not None:
+                    if getattr(fn, "name", None):
+                        slot.function.name += fn.name
+                    if getattr(fn, "arguments", None):
+                        slot.function.arguments += fn.arguments
+                extra = (getattr(tc, "model_extra", None) or {}).get("extra_content")
+                if extra:
+                    slot.model_extra["extra_content"] = extra
+        yield ("end", "".join(content_parts), calls)
+        return
+    except Exception as exc:  # noqa: BLE001 -- some models/providers can't stream with tools: fall back to one call
+        import logging
+        logging.getLogger("uvicorn.error").warning("streaming failed, using a normal call instead: %s", exc)
+    if emitted:
+        yield ("reset",)
+    response = llm_config.create_completion(
+        client, model=MODEL, messages=messages, tools=TOOLS, tool_choice="auto", temperature=0.3,
+    )
+    msg = response.choices[0].message
+    fallback_calls = []
+    for tc in (msg.tool_calls or []):
+        c = _ToolCall(tc.id)
+        c.function.name, c.function.arguments = tc.function.name, tc.function.arguments
+        c.model_extra = dict(getattr(tc, "model_extra", None) or {})
+        fallback_calls.append(c)
+    if msg.content:
+        yield ("delta", msg.content)
+    yield ("end", msg.content or "", fallback_calls)
+
+
+def _tool_status(result) -> str:
+    return str(result.get("status") or ("error" if "error" in result else "ok")) if isinstance(result, dict) else "ok"
+
+
+def chat_with_tools_stream(user_message: str, history: list | None = None, image: str | None = None,
+                           location: dict | None = None, context: dict | None = None):
+    """Generator version of chat_with_tools(); see the event list above."""
+    if client is None:
+        raise RuntimeError("No AI key configured (set OPENROUTER_API_KEY, GEMINI_API_KEY or DEEPSEEK_API_KEY)")
+
+    messages = _prepare_messages(user_message, history, image, context)
+    tool_events: list = []
+    nudged = False
+    for _ in range(MAX_TOOL_ROUNDS + 1):
+        content, tool_calls, shown = "", [], False
+        for ev in _stream_round(messages):
+            if ev[0] == "delta":
+                shown = True
+                yield {"type": "delta", "text": ev[1]}
+            elif ev[0] == "reset":
+                shown = False
+                yield {"type": "reset"}
+            else:
+                content, tool_calls = ev[1], ev[2]
+
+        if not tool_calls:
+            reply = content or "I could not generate a response right now."
+            if _claims_logged(reply) and not _log_succeeded(tool_events):
+                if not nudged:
+                    nudged = True
+                    messages.append({"role": "assistant", "content": reply})
+                    messages.append({"role": "system", "content": _LOG_NUDGE})
+                    yield {"type": "reset"}
+                    continue
+                error = _last_log_error(tool_events)
+                reply = ("I couldn't save that to your food log" + (f" ({error})" if error else "") +
+                         ". Nothing was added yet -- tell me the food, amount and meal again and I'll retry.")
+                yield {"type": "reset"}
+                yield {"type": "delta", "text": reply}
+            elif not shown:
+                yield {"type": "delta", "text": reply}
+            yield {"type": "final", "reply": reply, "tool_events": tool_events}
+            return
+
+        if shown:  # text written before a tool call is a preamble, not the answer (same as chat_with_tools)
+            yield {"type": "reset"}
+        messages.append({
+            "role": "assistant",
+            "content": content or "",
+            "tool_calls": [_tool_call_dict(tc) for tc in tool_calls],
+        })
+        for tc in tool_calls:
+            name = tc.function.name
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            yield {"type": "tool_start", "name": name, "args": args}
+            impl = TOOL_IMPL.get(name)
+            if name == "find_restaurants":
+                result = _tool_find_restaurants(args, location)
+            else:
+                result = impl(args) if impl else {"error": f"unknown tool '{name}'"}
+            tool_events.append({"tool": name, "args": args, "result": result})
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, default=str)})
+            yield {"type": "tool_end", "name": name, "status": _tool_status(result)}
+
+    reply = "I ran into trouble figuring that out -- could you rephrase what you ate?"
+    yield {"type": "delta", "text": reply}
+    yield {"type": "final", "reply": reply, "tool_events": tool_events}
 
 
 # Kept for callers that used these names in the original CLI implementation.
