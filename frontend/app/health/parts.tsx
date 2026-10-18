@@ -1,7 +1,8 @@
 "use client";
 
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Lightbulb, Minus, Plus } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Flame, Footprints, HeartPulse, Lightbulb, Minus, Plus, Scale, Timer, Zap } from "lucide-react";
+import { FoodGlyph, GlyphKind } from "../components/art/FoodGlyph";
 
 /* ---------------------------------- types ---------------------------------- */
 export type Extras = {
@@ -62,11 +63,59 @@ export function BalanceScale({ eaten, burned }: { eaten: number; burned: number 
   const rx = px + L * Math.cos(a), ry = py + L * Math.sin(a);
   const food = Math.min(8, eaten > 0 ? Math.max(1, Math.round(eaten / 250)) : 0);
   const shoes = Math.min(8, burned > 0 ? Math.max(1, Math.round(burned / 250)) : 0);
-  const items = (n: number, cx: number, cy: number, set: string[]) =>
+
+  // Crafted botanical food tokens (terracotta bowls, spice pots, grain jars)
+  const renderFoodTokens = (n: number, cx: number, cy: number) =>
     Array.from({ length: n }, (_, i) => {
       const row = Math.floor(i / 4), col = i % 4, inRow = Math.min(4, n - row * 4);
-      return <text key={i} x={cx + (col - (inRow - 1) / 2) * 27} y={cy - row * 27} fontSize="20" textAnchor="middle">{set[i % set.length]}</text>;
+      const ox = cx + (col - (inRow - 1) / 2) * 26;
+      const oy = cy - row * 22;
+      const variant = i % 3;
+      if (variant === 0) {
+        // Terracotta grain bowl
+        return (
+          <g key={i} transform={`translate(${ox}, ${oy})`}>
+            <path d="M -10 -2 Q 0 12 10 -2 Z" fill="#c85a32" stroke="#8c3822" strokeWidth="1" />
+            <ellipse cx="0" cy="-2" rx="10" ry="3" fill="#ecd9b3" stroke="#8c3822" strokeWidth="0.8" />
+            <circle cx="0" cy="-2" r="1.5" fill="#d48c28" />
+          </g>
+        );
+      } else if (variant === 1) {
+        // Ochre harvest jar
+        return (
+          <g key={i} transform={`translate(${ox}, ${oy})`}>
+            <rect x="-8" y="-6" width="16" height="12" rx="3" fill="#d48c28" stroke="#8a5e19" strokeWidth="1" />
+            <line x1="-8" y1="-3" x2="8" y2="-3" stroke="#8a5e19" strokeWidth="0.8" />
+            <circle cx="0" cy="0" r="2" fill="#faf6ee" />
+          </g>
+        );
+      } else {
+        // Sage botanical vessel
+        return (
+          <g key={i} transform={`translate(${ox}, ${oy})`}>
+            <path d="M -9 4 L -7 -6 L 7 -6 L 9 4 Z" fill="#5b8266" stroke="#2b4639" strokeWidth="1" />
+            <ellipse cx="0" cy="-6" rx="7" ry="2.5" fill="#eef2e1" stroke="#2b4639" strokeWidth="0.8" />
+          </g>
+        );
+      }
     });
+
+  // Crafted solid turned brass calibration counterweights
+  const renderEnergyTokens = (n: number, cx: number, cy: number) =>
+    Array.from({ length: n }, (_, i) => {
+      const row = Math.floor(i / 4), col = i % 4, inRow = Math.min(4, n - row * 4);
+      const ox = cx + (col - (inRow - 1) / 2) * 26;
+      const oy = cy - row * 22;
+      return (
+        <g key={i} transform={`translate(${ox}, ${oy})`}>
+          <rect x="-9" y="-6" width="18" height="14" rx="2" fill="#d5cca8" stroke="#877c57" strokeWidth="1" />
+          <line x1="-9" y1="1" x2="9" y2="1" stroke="#a6996d" strokeWidth="1" />
+          <circle cx="0" cy="-8" r="2.5" fill="#a6996d" stroke="#877c57" strokeWidth="0.8" />
+          <circle cx="0" cy="-1" r="1.5" fill="#695f3b" />
+        </g>
+      );
+    });
+
   const pan = (cx: number, cy: number, fill: string) => (
     <g>
       <line x1={cx} y1={cy} x2={cx - 54} y2={cy + 78} stroke="#8c8270" strokeWidth="1.5" />
@@ -86,8 +135,8 @@ export function BalanceScale({ eaten, burned }: { eaten: number; burned: number 
         <line x1={lx} y1={ly} x2={rx} y2={ry} stroke="#695133" strokeWidth="8" strokeLinecap="round" />
         <line x1={lx} y1={ly} x2={rx} y2={ry} stroke="#8c704a" strokeWidth="3" strokeLinecap="round" strokeDasharray="6 8" />
         {pan(lx, ly, "#faf1ea")}{pan(rx, ry, "#eef5ed")}
-        {items(food, lx, ly + 70, ["🍛", "🥗", "🍎", "🍞"])}
-        {items(shoes, rx, ry + 70, ["🔥", "⚡", "👟"])}
+        {renderFoodTokens(food, lx, ly + 70)}
+        {renderEnergyTokens(shoes, rx, ry + 70)}
         <circle cx={px} cy={py} r="10" fill="#2f4d42" stroke="#d5cca8" strokeWidth="2" />
         <circle cx={px} cy={py} r="3.5" fill="#fcfaf5" />
       </svg>
@@ -106,17 +155,18 @@ export function BalanceScale({ eaten, burned }: { eaten: number; burned: number 
 export function PlateRings({ steps, kcal, active, kcalGoal }: { steps: number; kcal: number; active: number; kcalGoal: number }) {
   const [hover, setHover] = useState(0);
   const rings = [
-    { label: "Steps", value: steps, goal: 10000, unit: "steps", color: "#dbb258", r: 94 },
-    { label: "Energy burned", value: kcal, goal: kcalGoal, unit: "kcal", color: "#d88c72", r: 74 },
-    { label: "Active minutes", value: active, goal: 30, unit: "min", color: "#4a6559", r: 54 },
+    { label: "Steps", value: steps, goal: 10000, unit: "steps", color: "#d48c28", r: 94 },
+    { label: "Energy burned", value: kcal, goal: kcalGoal, unit: "kcal", color: "#c85a32", r: 74 },
+    { label: "Active minutes", value: active, goal: 30, unit: "min", color: "#3e5d4e", r: 54 },
   ];
   const prog = useTween(1, 1200);
   const cur = rings[hover];
   return (
     <div className="hx-plate">
-      <svg viewBox="0 0 280 280" role="img" aria-label="Activity rings on a plate">
-        <circle cx="140" cy="140" r="134" fill="#fff" stroke="#e7e1d8" />
-        <circle cx="140" cy="140" r="122" fill="#fbf8f1" stroke="#efe9dd" />
+      <svg viewBox="0 0 280 280" role="img" aria-label="Activity rings on a ceramic plate">
+        <circle cx="140" cy="140" r="134" fill="#faf6ee" stroke="#e5dfd3" strokeWidth="2" />
+        <circle cx="140" cy="140" r="122" fill="#fff" stroke="#f0ece3" strokeWidth="1.5" />
+        <circle cx="140" cy="140" r="114" fill="#faf6ee" opacity="0.6" />
         {rings.map((g, i) => {
           const c = 2 * Math.PI * g.r, p = clamp(g.value / g.goal, 0, 1) * prog;
           return (
@@ -127,13 +177,13 @@ export function PlateRings({ steps, kcal, active, kcalGoal }: { steps: number; k
             </g>
           );
         })}
-        <text x="140" y="138" textAnchor="middle" className="hx-plate-num">{fmt(cur.value)}</text>
-        <text x="140" y="158" textAnchor="middle" className="hx-plate-lbl">{cur.unit} · {Math.round((cur.value / cur.goal) * 100)}%</text>
+        <text x="140" y="136" textAnchor="middle" className="hx-plate-num almanac-serif" style={{ fontSize: "24px", fill: "var(--ink)" }}>{fmt(cur.value)}</text>
+        <text x="140" y="156" textAnchor="middle" className="hx-plate-lbl almanac-mono" style={{ fontSize: "11px", fill: "var(--ink-soft)" }}>{cur.unit} · {Math.round((cur.value / cur.goal) * 100)}%</text>
       </svg>
       <ul className="hx-plate-legend">
         {rings.map((g, i) => (
           <li key={g.label} onMouseEnter={() => setHover(i)} className={hover === i ? "on" : ""}>
-            <i style={{ background: g.color }} /><span>{g.label}</span><b>{fmt(g.value)}<small> / {fmt(g.goal)}</small></b>
+            <i style={{ background: g.color }} /><span>{g.label}</span><b className="tabular">{fmt(g.value)}<small> / {fmt(g.goal)}</small></b>
           </li>
         ))}
       </ul>
@@ -308,15 +358,21 @@ export function InsightList({ items }: { items: Insights["insights"] }) {
 }
 
 /* ----------------------------------- Food lab -------------------------------- */
-const FOODS = [
-  { name: "Banana", emoji: "🍌", kcal: 105 }, { name: "Idli", emoji: "🍚", kcal: 60 }, { name: "Roti", emoji: "🫓", kcal: 100 },
-  { name: "Samosa", emoji: "🥟", kcal: 260 }, { name: "Masala dosa", emoji: "🌯", kcal: 250 }, { name: "Gulab jamun", emoji: "🍡", kcal: 150 },
-  { name: "Chai (sugar)", emoji: "🍵", kcal: 85 }, { name: "Veg biryani", emoji: "🍛", kcal: 350 }, { name: "Pizza slice", emoji: "🍕", kcal: 285 },
+const FOODS: { name: string; glyph: GlyphKind; kcal: number }[] = [
+  { name: "Idli", glyph: "idli", kcal: 60 },
+  { name: "Roti", glyph: "roti", kcal: 100 },
+  { name: "Masala dosa", glyph: "dosa", kcal: 250 },
+  { name: "Dal & Rice", glyph: "dal", kcal: 220 },
+  { name: "Veg biryani", glyph: "rice", kcal: 350 },
+  { name: "Paneer bowl", glyph: "paneer", kcal: 280 },
+  { name: "Banana", glyph: "banana", kcal: 105 },
+  { name: "Spiced chai", glyph: "chai", kcal: 85 },
+  { name: "Fresh greens", glyph: "leaf", kcal: 90 },
 ];
 
 export function FoodLab({ burned, eaten, avgBalance, walk, weight }: { burned: number; eaten: number; avgBalance: number | null;
   walk: Insights["walk"] | null; weight: number | null }) {
-  const [sel, setSel] = useState(3);
+  const [sel, setSel] = useState(2);
   const [qty, setQty] = useState(1);
   const f = FOODS[sel], kcal = f.kcal * qty;
   const w = walk ?? { stride_m: 0.7, kcal_per_km: 0.55 * (weight ?? 65), kcal_per_step: 0.55 * (weight ?? 65) * 0.0007, steps_per_km: 1430 };
@@ -329,14 +385,19 @@ export function FoodLab({ burned, eaten, avgBalance, walk, weight }: { burned: n
         <div className="hx-foods">
           {FOODS.map((x, i) => (
             <button key={x.name} className={i === sel ? "on" : ""} onClick={() => setSel(i)} title={`${x.name}: about ${x.kcal} kcal`}>
-              <span>{x.emoji}</span><b>{burned > 0 ? (burned / x.kcal).toFixed(1) : "0"}</b><small>{x.name}</small>
+              <span className="hx-food-glyph"><FoodGlyph glyph={x.glyph} size={18} /></span>
+              <b>{burned > 0 ? (burned / x.kcal).toFixed(1) : "0"}</b>
+              <small>{x.name}</small>
             </button>
           ))}
         </div>
         <small className="hx-fine">Calories per item are typical averages and vary by recipe and size.</small>
       </div>
       <div className="hx-sim">
-        <div className="hx-sim-head"><span className="hx-sim-emoji">{f.emoji}</span>
+        <div className="hx-sim-head">
+          <span className="hx-sim-glyph" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "36px", height: "36px", borderRadius: "10px", background: "var(--paper-dim)" }}>
+            <FoodGlyph glyph={f.glyph} size={22} />
+          </span>
           <div><b>What if I eat {qty} {f.name}?</b><small>{fmt(kcal)} kcal</small></div>
           <div className="hx-qty"><button onClick={() => setQty(q => Math.max(1, q - 1))} aria-label="Fewer"><Minus size={14} /></button><b>{qty}</b><button onClick={() => setQty(q => Math.min(8, q + 1))} aria-label="More"><Plus size={14} /></button></div>
         </div>
@@ -353,7 +414,17 @@ export function FoodLab({ burned, eaten, avgBalance, walk, weight }: { burned: n
 }
 
 /* ------------------------------- Activity breakdown -------------------------- */
-const ACT_EMOJI: Record<string, string> = { Walking: "🚶", Running: "🏃", Cycling: "🚴", Aerobics: "🤸", "Strength training": "🏋️", Yoga: "🧘", Football: "⚽", Basketball: "🏀", Badminton: "🏸", "On foot": "👣" };
+function getActivityIcon(name: string) {
+  const s = name.toLowerCase();
+  if (s.includes("walk") || s.includes("foot")) return <Footprints size={16} />;
+  if (s.includes("run")) return <Zap size={16} />;
+  if (s.includes("cycl") || s.includes("bike")) return <Activity size={16} />;
+  if (s.includes("strength") || s.includes("weight")) return <Scale size={16} />;
+  if (s.includes("yoga")) return <HeartPulse size={16} />;
+  if (s.includes("aerobic") || s.includes("cardio")) return <Flame size={16} />;
+  return <Timer size={16} />;
+}
+
 export function ActivityMix({ acts }: { acts: Record<string, number> }) {
   const list = Object.entries(acts).sort((a, b) => b[1] - a[1]);
   if (!list.length) return <p className="empty-state">No workouts or walks recorded by Google Fit today yet.</p>;
@@ -361,8 +432,14 @@ export function ActivityMix({ acts }: { acts: Record<string, number> }) {
   return (
     <div className="hx-acts">
       {list.map(([k, v]) => (
-        <div key={k}><span>{ACT_EMOJI[k] ?? "✨"}</span><b>{k}</b>
-          <div className="progress-track"><span className="progress-fill emerald" style={{ width: `${(v / max) * 100}%` }} /></div><em>{Math.round(v)} min</em></div>
+        <div key={k}>
+          <span className="hx-act-icon" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--sage-leaf)" }}>
+            {getActivityIcon(k)}
+          </span>
+          <b>{k}</b>
+          <div className="progress-track"><span className="progress-fill emerald" style={{ width: `${(v / max) * 100}%` }} /></div>
+          <em>{Math.round(v)} min</em>
+        </div>
       ))}
     </div>
   );

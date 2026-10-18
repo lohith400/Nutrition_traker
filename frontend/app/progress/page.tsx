@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, Sparkles, TrendingUp } from "lucide-react";
 import Shell, { API } from "../components/Shell";
+import { ScrollReveal } from "../components/motion/ScrollReveal";
 import { Consistency, WeightTracker } from "./parts";
 
 type DayEntry = { date: string; meals: unknown[]; total_calories: number; total_protein_g: number; total_carbs_g: number; total_fat_g: number };
@@ -106,8 +107,13 @@ export default function ProgressPage() {
       <div className="page-wrap">
         <div className="hero-row">
           <div>
-            <h1>Your progress <span>✦</span></h1>
-            <p className="subtitle">How your eating compares with your daily targets over time, built from the meals you&apos;ve logged.</p>
+            <div className="almanac-eyebrow">
+              <span>NUTRITIONAL ARCHIVE</span>
+              <span className="dot-sep">·</span>
+              <span>TRAJECTORY &amp; HABITS</span>
+            </div>
+            <h1 className="almanac-serif">Your Progress &amp; Rhythm <span>✦</span></h1>
+            <p className="subtitle">How your eating compares with your daily targets over time, recorded in your personal pantry ledger.</p>
           </div>
           <div className="segmented" role="group" aria-label="Time range">
             {RANGES.map(r => (
@@ -126,83 +132,95 @@ export default function ProgressPage() {
           </div>
         )}
 
-        <div className="stats-grid progress-stats">
-          <div className="stat-card"><div className="stat-topline">Days logged</div><div className="stat-number">{stats.logged}<small>of {range}</small></div></div>
-          <div className="stat-card"><div className="stat-topline">Average calories</div><div className="stat-number">{Math.round(stats.avgCal)}<small>kcal / day</small></div></div>
-          <div className="stat-card"><div className="stat-topline">Average protein</div><div className="stat-number">{Math.round(stats.avgPro)}<small>g / day</small></div></div>
-          <div className="stat-card"><div className="stat-topline">Protein goal met</div><div className="stat-number">{stats.proteinHit}<small>{stats.logged ? `of ${stats.logged} days` : "days"}</small></div></div>
-        </div>
-
-        <section className="panel chart-panel">
-          <div className="panel-head">
-            <div><h3>Daily {metric}</h3><p>{target ? `Dashed line marks your ${target}${unit} goal.` : "Set up your profile to see your goal line."} Averages count only days you logged.</p></div>
-            <div className="segmented" role="group" aria-label="Chart metric">
-              <button className={metric === "calories" ? "seg active" : "seg"} onClick={() => setMetric("calories")} aria-pressed={metric === "calories"}>Calories</button>
-              <button className={metric === "protein" ? "seg active" : "seg"} onClick={() => setMetric("protein")} aria-pressed={metric === "protein"}>Protein</button>
-            </div>
+        <ScrollReveal>
+          <div className="stats-grid progress-stats">
+            <div className="stat-card"><div className="stat-topline">Days logged</div><div className="stat-number">{stats.logged}<small>of {range}</small></div></div>
+            <div className="stat-card"><div className="stat-topline">Average calories</div><div className="stat-number">{Math.round(stats.avgCal)}<small>kcal / day</small></div></div>
+            <div className="stat-card"><div className="stat-topline">Average protein</div><div className="stat-number">{Math.round(stats.avgPro)}<small>g / day</small></div></div>
+            <div className="stat-card"><div className="stat-topline">Protein goal met</div><div className="stat-number">{stats.proteinHit}<small>{stats.logged ? `of ${stats.logged} days` : "days"}</small></div></div>
           </div>
-          {loading ? <p className="empty-state">Loading…</p> : stats.logged === 0 ? (
-            <p className="empty-state">No meals logged in the last {range} days. Log a meal in the <Link className="inline-link" href="/log">Food log</Link> or tell the <Link className="inline-link" href="/chat">coach</Link> what you ate.</p>
-          ) : (
-            <div className="bar-chart" role="img" aria-label={`Daily ${metric} for the last ${range} days`}>
-              {target > 0 && <span className="goal-line" style={{ bottom: `calc(18px + (100% - 18px) * ${target / chartMax})` }} />}
-              {series.map((point, index) => (
-                <div className="bar-col" key={point.date} title={`${shortDay(point.date)}: ${point.logged ? `${Math.round(point.value)} ${unit}` : "nothing logged"}`}>
-                  <div className="bar-slot">
-                    <span className={`bar ${point.logged ? (target && point.value > target * 1.05 && metric === "calories" ? "over" : "") : "none"}`} style={{ height: `${point.logged ? Math.max(3, (point.value / chartMax) * 100) : 0}%` }} />
-                  </div>
-                  <small>{range <= 14 || index % 5 === 0 || index === series.length - 1 ? shortDay(point.date) : ""}</small>
-                </div>
-              ))}
+        </ScrollReveal>
+
+        <ScrollReveal delay={0.06}>
+          <section className="panel chart-panel">
+            <div className="panel-head">
+              <div><h3>Daily {metric}</h3><p>{target ? `Dashed line marks your ${target}${unit} goal.` : "Set up your profile to see your goal line."} Averages count only days you logged.</p></div>
+              <div className="segmented" role="group" aria-label="Chart metric">
+                <button className={metric === "calories" ? "seg active" : "seg"} onClick={() => setMetric("calories")} aria-pressed={metric === "calories"}>Calories</button>
+                <button className={metric === "protein" ? "seg active" : "seg"} onClick={() => setMetric("protein")} aria-pressed={metric === "protein"}>Protein</button>
+              </div>
             </div>
-          )}
-        </section>
-
-        <Consistency calorieTarget={calorieTarget} proteinTarget={proteinTarget} />
-
-        <div className="content-grid progress-grid">
-          <section className="panel">
-            <div className="panel-head"><div><h3>Weight goal</h3><p>{goalLabel(profile?.goal)}</p></div></div>
-            {current !== undefined && goalWeight !== undefined && diff !== null ? (
-              <>
-                <div className="weight-row">
-                  <div><span>Now</span><b>{current}<small> kg</small></b></div>
-                  <div className="weight-arrow" aria-hidden="true">→</div>
-                  <div><span>Goal</span><b>{goalWeight}<small> kg</small></b></div>
-                </div>
-                <p className="weight-note">{diff === 0 ? "You're at your goal weight." : diff < 0 ? `${Math.abs(diff)} kg to lose to reach your goal.` : `${diff} kg to gain to reach your goal.`}</p>
-                <p className="weight-note muted">Updating your weight on your <Link className="inline-link" href="/profile">profile</Link> recalculates your targets.</p>
-              </>
-            ) : <p className="empty-state">Add your weights on your profile to see your goal here.</p>}
-          </section>
-
-          <section className="panel">
-            <div className="panel-head"><div><h3>Most logged foods</h3><p>What you eat most often</p></div></div>
-            {foods.length === 0 ? <p className="empty-state">Foods you log will show up here.</p> : (
-              <div className="food-bars">
-                {foods.map(food => (
-                  <div className="food-bar-row" key={food.food_name}>
-                    <div className="food-bar-label"><b>{food.food_name}</b><span>{food.times_logged}×</span></div>
-                    <div className="progress-track"><span className="progress-fill blue" style={{ width: `${(food.times_logged / topCount) * 100}%` }} /></div>
+            {loading ? <p className="empty-state">Loading…</p> : stats.logged === 0 ? (
+              <p className="empty-state">No meals logged in the last {range} days. Log a meal in the <Link className="inline-link" href="/log">Food log</Link> or tell the <Link className="inline-link" href="/chat">coach</Link> what you ate.</p>
+            ) : (
+              <div className="bar-chart" role="img" aria-label={`Daily ${metric} for the last ${range} days`}>
+                {target > 0 && <span className="goal-line" style={{ bottom: `calc(18px + (100% - 18px) * ${target / chartMax})` }} />}
+                {series.map((point, index) => (
+                  <div className="bar-col" key={point.date} title={`${shortDay(point.date)}: ${point.logged ? `${Math.round(point.value)} ${unit}` : "nothing logged"}`}>
+                    <div className="bar-slot">
+                      <span className={`bar ${point.logged ? (target && point.value > target * 1.05 && metric === "calories" ? "over" : "") : "none"}`} style={{ height: `${point.logged ? Math.max(3, (point.value / chartMax) * 100) : 0}%` }} />
+                    </div>
+                    <small>{range <= 14 || index % 5 === 0 || index === series.length - 1 ? shortDay(point.date) : ""}</small>
                   </div>
                 ))}
               </div>
             )}
           </section>
-        </div>
+        </ScrollReveal>
 
-        <section className="panel wt-panel">
-          <div className="panel-head"><div><h3>Weight over time</h3><p>Log a reading whenever you weigh yourself. Your trend and estimated goal date update automatically.</p></div></div>
-          <WeightTracker goalWeight={goalWeight} startWeight={undefined} />
-        </section>
+        <ScrollReveal delay={0.08}>
+          <Consistency calorieTarget={calorieTarget} proteinTarget={proteinTarget} />
+        </ScrollReveal>
+
+        <ScrollReveal delay={0.1}>
+          <div className="content-grid progress-grid">
+            <section className="panel">
+              <div className="panel-head"><div><h3>Weight goal</h3><p>{goalLabel(profile?.goal)}</p></div></div>
+              {current !== undefined && goalWeight !== undefined && diff !== null ? (
+                <>
+                  <div className="weight-row">
+                    <div><span>Now</span><b>{current}<small> kg</small></b></div>
+                    <div className="weight-arrow" aria-hidden="true">→</div>
+                    <div><span>Goal</span><b>{goalWeight}<small> kg</small></b></div>
+                  </div>
+                  <p className="weight-note">{diff === 0 ? "You're at your goal weight." : diff < 0 ? `${Math.abs(diff)} kg to lose to reach your goal.` : `${diff} kg to gain to reach your goal.`}</p>
+                  <p className="weight-note muted">Updating your weight on your <Link className="inline-link" href="/profile">profile</Link> recalculates your targets.</p>
+                </>
+              ) : <p className="empty-state">Add your weights on your profile to see your goal here.</p>}
+            </section>
+
+            <section className="panel">
+              <div className="panel-head"><div><h3>Most logged foods</h3><p>What you eat most often</p></div></div>
+              {foods.length === 0 ? <p className="empty-state">Foods you log will show up here.</p> : (
+                <div className="food-bars">
+                  {foods.map(food => (
+                    <div className="food-bar-row" key={food.food_name}>
+                      <div className="food-bar-label"><b>{food.food_name}</b><span>{food.times_logged}×</span></div>
+                      <div className="progress-track"><span className="progress-fill blue" style={{ width: `${(food.times_logged / topCount) * 100}%` }} /></div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        </ScrollReveal>
+
+        <ScrollReveal delay={0.12}>
+          <section className="panel wt-panel">
+            <div className="panel-head"><div><h3>Weight over time</h3><p>Log a reading whenever you weigh yourself. Your trend and estimated goal date update automatically.</p></div></div>
+            <WeightTracker goalWeight={goalWeight} startWeight={undefined} />
+          </section>
+        </ScrollReveal>
 
         {patterns.length > 0 && (
-          <section className="panel patterns-panel">
-            <div className="panel-head"><div><h3>What I&apos;ve noticed</h3><p>Patterns from your recent days</p></div><TrendingUp size={18} /></div>
-            <ul className="pattern-list">
-              {patterns.map(p => <li key={p.pattern_type}>{p.description}</li>)}
-            </ul>
-          </section>
+          <ScrollReveal delay={0.14}>
+            <section className="panel patterns-panel">
+              <div className="panel-head"><div><h3>What I&apos;ve noticed</h3><p>Patterns from your recent days</p></div><TrendingUp size={18} /></div>
+              <ul className="pattern-list">
+                {patterns.map(p => <li key={p.pattern_type}>{p.description}</li>)}
+              </ul>
+            </section>
+          </ScrollReveal>
         )}
       </div>
     </Shell>
