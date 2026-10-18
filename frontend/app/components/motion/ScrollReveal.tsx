@@ -35,18 +35,6 @@ export function ScrollReveal({
         return;
       }
 
-      // 2. Check if CSS scroll-driven animations are natively supported
-      const hasCSSScrollDriven =
-        typeof CSS !== "undefined" &&
-        CSS.supports &&
-        CSS.supports("animation-timeline", "view()");
-
-      // If natively supported, pure CSS handles it via .css-scroll-reveal class
-      if (hasCSSScrollDriven) {
-        return;
-      }
-
-      // 3. Fallback for Firefox and browsers without CSS animation-timeline: GSAP ScrollTrigger
       if (elementRef.current) {
         gsap.fromTo(
           elementRef.current,
@@ -57,14 +45,20 @@ export function ScrollReveal({
           {
             opacity: 1,
             y: 0,
-            duration: 0.9,
+            duration: 0.8,
             ease: "cubic-bezier(0.22, 1, 0.36, 1)",
             delay,
             scrollTrigger: {
               trigger: elementRef.current,
-              start: "top 88%",
+              start: "top 90%",
               toggleActions: "play none none none",
               once: true,
+            },
+            onComplete: () => {
+              if (elementRef.current) {
+                elementRef.current.style.transform = "none";
+                elementRef.current.style.willChange = "auto";
+              }
             },
           }
         );

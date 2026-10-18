@@ -24,9 +24,11 @@ export function useSmoothScroll() {
 export function SmoothScrollProvider({
   children,
   enabled = true,
+  smoothWheel = false,
 }: {
   children: ReactNode;
   enabled?: boolean;
+  smoothWheel?: boolean;
 }) {
   const [lenisInstance, setLenisInstance] = useState<Lenis | null>(null);
   const [isReducedMotion, setIsReducedMotion] = useState(false);
@@ -39,14 +41,14 @@ export function SmoothScrollProvider({
       return;
     }
 
-    // 2. Initialize Lenis with fluid responsive lerp (responsive, zero-delay momentum)
+    // 2. Initialize Lenis (smoothWheel: false allows 100% native hardware scroll without JS hijacking)
     const lenis = new Lenis({
-      lerp: 0.1, // Responsive fluid momentum without sluggish delay
-      wheelMultiplier: 1.0, // Natural 1:1 wheel response
+      lerp: 0.1,
+      wheelMultiplier: 1.0,
       touchMultiplier: 1.5,
       orientation: "vertical",
       gestureOrientation: "vertical",
-      smoothWheel: true,
+      smoothWheel,
       infinite: false,
     });
 

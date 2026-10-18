@@ -34,11 +34,11 @@ export default function Dev3DTestPage() {
   const [waterL, setWaterL] = useState(2.25);
   const targetWaterL = 3.5;
 
-  // Scroll mode toggle: allows testing Lenis fluid lerp vs standard native browser scrolling
-  const [smoothScrollEnabled, setSmoothScrollEnabled] = useState(true);
+  // Scroll mode toggle: defaults to 100% native hardware scrolling (never gets stuck)
+  const [smoothScrollEnabled, setSmoothScrollEnabled] = useState(false);
 
   return (
-    <SmoothScrollProvider enabled={smoothScrollEnabled}>
+    <SmoothScrollProvider enabled={true} smoothWheel={smoothScrollEnabled}>
       <div
         style={{
           minHeight: "100vh",
