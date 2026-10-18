@@ -34,8 +34,11 @@ export default function Dev3DTestPage() {
   const [waterL, setWaterL] = useState(2.25);
   const targetWaterL = 3.5;
 
+  // Scroll mode toggle: allows testing Lenis fluid lerp vs standard native browser scrolling
+  const [smoothScrollEnabled, setSmoothScrollEnabled] = useState(true);
+
   return (
-    <SmoothScrollProvider>
+    <SmoothScrollProvider enabled={smoothScrollEnabled}>
       <div
         style={{
           minHeight: "100vh",
@@ -78,35 +81,58 @@ export default function Dev3DTestPage() {
                 }}
               />
             </div>
-            <div
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "8px 16px",
-                borderRadius: 24,
-                background: tier === "none" ? "#f3e8e8" : "#e8efe9",
-                border: `1px solid ${tier === "none" ? "#d9a4a4" : "#bed2c2"}`,
-                fontSize: 13,
-                fontWeight: 600,
-              }}
-            >
-              <span
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                onClick={() => setSmoothScrollEnabled((prev) => !prev)}
                 style={{
-                  width: 9,
-                  height: 9,
-                  borderRadius: "50%",
-                  background:
-                    tier === "high"
-                      ? "#2d8a4e"
-                      : tier === "mid"
-                      ? "#d48c28"
-                      : tier === "low"
-                      ? "#c85a32"
-                      : "#7f7b70",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 14px",
+                  borderRadius: 24,
+                  background: smoothScrollEnabled ? "#1c3a2b" : "#f0ede6",
+                  color: smoothScrollEnabled ? "#ffffff" : "#6c6659",
+                  border: `1px solid ${smoothScrollEnabled ? "#1c3a2b" : "#d8d1c3"}`,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
                 }}
-              />
-              Active Tier: <strong style={{ textTransform: "uppercase" }}>{tier}</strong>
+              >
+                <span>Scroll:</span>
+                <strong>{smoothScrollEnabled ? "Fluid Momentum (Lenis)" : "Standard Native"}</strong>
+              </button>
+
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 16px",
+                  borderRadius: 24,
+                  background: tier === "none" ? "#f3e8e8" : "#e8efe9",
+                  border: `1px solid ${tier === "none" ? "#d9a4a4" : "#bed2c2"}`,
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                <span
+                  style={{
+                    width: 9,
+                    height: 9,
+                    borderRadius: "50%",
+                    background:
+                      tier === "high"
+                        ? "#2d8a4e"
+                        : tier === "mid"
+                        ? "#d48c28"
+                        : tier === "low"
+                        ? "#c85a32"
+                        : "#7f7b70",
+                  }}
+                />
+                Active Tier: <strong style={{ textTransform: "uppercase" }}>{tier}</strong>
+              </div>
             </div>
           </div>
         </header>

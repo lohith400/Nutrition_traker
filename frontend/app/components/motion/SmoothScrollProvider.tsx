@@ -39,15 +39,14 @@ export function SmoothScrollProvider({
       return;
     }
 
-    // 2. Initialize Lenis with cinematic inertial settings (Apple-level weighting)
+    // 2. Initialize Lenis with fluid responsive lerp (responsive, zero-delay momentum)
     const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)), // Exponential deceleration
+      lerp: 0.1, // Responsive fluid momentum without sluggish delay
+      wheelMultiplier: 1.0, // Natural 1:1 wheel response
+      touchMultiplier: 1.5,
       orientation: "vertical",
       gestureOrientation: "vertical",
       smoothWheel: true,
-      wheelMultiplier: 0.9,
-      touchMultiplier: 1.5,
       infinite: false,
     });
 
@@ -56,13 +55,14 @@ export function SmoothScrollProvider({
     // 3. Synchronize Lenis scroll updates with GSAP ScrollTrigger
     lenis.on("scroll", ScrollTrigger.update);
 
-    // 4. Drive Lenis through GSAP ticker for frame-perfect alignment
+    // 4. Drive Lenis through GSAP ticker with healthy lag smoothing
     const updateTicker = (time: number) => {
       lenis.raf(time * 1000);
     };
 
     gsap.ticker.add(updateTicker);
-    gsap.ticker.lagSmoothing(0);
+    // Maintain healthy lag smoothing so frame drops don't lock or stutter the scroll
+    gsap.ticker.lagSmoothing(500, 33);
 
     return () => {
       gsap.ticker.remove(updateTicker);
