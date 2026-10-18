@@ -32,6 +32,10 @@ dist/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 
 # =========================
 # Node / Next.js (frontend)
