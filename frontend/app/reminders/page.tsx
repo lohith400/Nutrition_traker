@@ -66,8 +66,7 @@ export default function RemindersPage() {
       (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     const isStandalone =
       window.matchMedia("(display-mode: standalone)").matches ||
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      Boolean((navigator as any).standalone);
+      Boolean((navigator as unknown as { standalone?: boolean }).standalone);
 
     if (isIOS && !isStandalone) {
       setDeviceState("needs-install");
