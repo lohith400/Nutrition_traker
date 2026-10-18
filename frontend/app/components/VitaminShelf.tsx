@@ -1,7 +1,11 @@
 "use client";
 
 import React, { useState } from "react";
+import dynamic from "next/dynamic";
 import { Info, Sparkles, ChevronDown } from "lucide-react";
+import { useTierCapabilities } from "../hooks/useQualityTier";
+
+const VitaminShelf3D = dynamic(() => import("./VitaminShelf3D"), { ssr: false });
 
 export type MicronutrientItem = {
   key: string;
@@ -44,6 +48,8 @@ export function VitaminShelf({
   className = "",
 }: VitaminShelfProps) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  const caps = useTierCapabilities();
+  const [view3D, setView3D] = useState(true);
 
   const displayList = items && items.length > 0 ? items : DEFAULT_SLOTS;
   const isAvailable = status === "ok" && items && items.length > 0;
@@ -55,9 +61,29 @@ export function VitaminShelf({
           <span className="almanac-eyebrow">APOTHECARY PANTRY</span>
           <h3 className="almanac-serif">Vitamins &amp; Minerals Shelf</h3>
         </div>
-        <div className="shelf-legend">
-          <span className="legend-pip vit"><i /> Vitamins</span>
-          <span className="legend-pip min"><i /> Minerals</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {caps.render3D && (
+            <button
+              onClick={() => setView3D((v) => !v)}
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "4px 12px",
+                borderRadius: 16,
+                background: view3D ? "#e8efe9" : "#faf7f0",
+                color: view3D ? "#1c3a2b" : "#6c6659",
+                border: "1px solid #c8d8cc",
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+            >
+              {view3D ? "✦ 3D Canisters Active" : "2D Grid View"}
+            </button>
+          )}
+          <div className="shelf-legend">
+            <span className="legend-pip vit"><i /> Vitamins</span>
+            <span className="legend-pip min"><i /> Minerals</span>
+          </div>
         </div>
       </div>
 
@@ -67,6 +93,13 @@ export function VitaminShelf({
           <span>
             Micronutrient shelf activates as logs are recorded with ICMR-NIN reference mappings.
           </span>
+        </div>
+      )}
+
+      {/* 3D Apothecary Teak Wood Ledge */}
+      {caps.render3D && view3D && (
+        <div style={{ height: 260, position: "relative", marginBottom: 18, borderRadius: 12, overflow: "hidden", background: "radial-gradient(circle at 50% 50%, #faf6ee 0%, #eee6d6 100%)", border: "1px solid #e2dac9" }}>
+          <VitaminShelf3D items={items} activeKey={activeKey} onSelectKey={setActiveKey} />
         </div>
       )}
 

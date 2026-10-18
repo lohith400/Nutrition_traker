@@ -1,9 +1,14 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { Flame, Plus, Sparkles, TrendingUp } from "lucide-react";
 import { FoodGlyph } from "./art/FoodGlyph";
 import { useClientNow } from "../hooks/useClientNow";
+import { useTierCapabilities } from "../hooks/useQualityTier";
+
+// Lazy-load 3D thali to protect first-load JS budget
+const TodayPlate3D = dynamic(() => import("./TodayPlate3D"), { ssr: false });
 
 interface TodayPlateProps {
   consumed: number;
@@ -41,6 +46,7 @@ export function TodayPlate({
   onLogClick,
 }: TodayPlateProps) {
   const now = useClientNow();
+  const caps = useTierCapabilities();
   // Count-up display for calories
   const [displayedCal, setDisplayedCal] = useState(0);
 
@@ -114,113 +120,125 @@ export function TodayPlate({
       {/* The Crafted Plate Ceramic Experience */}
       <div className="plate-stage">
         <div className="plate-ceramic-wrap">
-          <svg
-            className="plate-ceramic-svg"
-            viewBox="0 0 240 240"
-            role="img"
-            aria-label={`Today's Plate: ${Math.round(consumed)} of ${Math.round(target)} calories eaten`}
-          >
-            {/* Outer Ceramic Plate Base */}
-            <circle cx="120" cy="120" r="114" fill="#faf8f2" stroke="#e0d9ca" strokeWidth="2" />
-            <circle cx="120" cy="120" r="108" fill="#ffffff" stroke="#ede7dc" strokeWidth="1" />
-            <circle cx="120" cy="120" r="82" fill="#fcfaf5" stroke="#eadecb" strokeWidth="1" strokeDasharray="2 3" />
+          {caps.render3D ? (
+            <div style={{ position: "absolute", inset: 0, zIndex: 1 }}>
+              <TodayPlate3D
+                protPct={protPct}
+                carbPct={carbPct}
+                fatPct={fatPct}
+                fibrePct={fibrePct}
+                active={true}
+              />
+            </div>
+          ) : (
+            <svg
+              className="plate-ceramic-svg"
+              viewBox="0 0 240 240"
+              role="img"
+              aria-label={`Today's Plate: ${Math.round(consumed)} of ${Math.round(target)} calories eaten`}
+            >
+              {/* Outer Ceramic Plate Base */}
+              <circle cx="120" cy="120" r="114" fill="#faf8f2" stroke="#e0d9ca" strokeWidth="2" />
+              <circle cx="120" cy="120" r="108" fill="#ffffff" stroke="#ede7dc" strokeWidth="1" />
+              <circle cx="120" cy="120" r="82" fill="#fcfaf5" stroke="#eadecb" strokeWidth="1" strokeDasharray="2 3" />
 
-            {/* Segment Track 1: Protein (Top-Right, 0° to 90° -> 270° offset in SVG) */}
-            <circle
-              cx="120"
-              cy="120"
-              r={r}
-              fill="none"
-              stroke="#ebf1ec"
-              strokeWidth="9"
-              strokeDasharray={`${arcLen} ${circumference - arcLen}`}
-              transform="rotate(-90 120 120)"
-            />
-            <circle
-              cx="120"
-              cy="120"
-              r={r}
-              fill="none"
-              stroke="var(--sage-leaf)"
-              strokeWidth="9"
-              strokeLinecap="round"
-              strokeDasharray={`${protPct * arcLen} ${circumference - (protPct * arcLen)}`}
-              transform="rotate(-90 120 120)"
-              className="plate-arc"
-            />
+              {/* Segment Track 1: Protein (Top-Right, 0° to 90° -> 270° offset in SVG) */}
+              <circle
+                cx="120"
+                cy="120"
+                r={r}
+                fill="none"
+                stroke="#ebf1ec"
+                strokeWidth="9"
+                strokeDasharray={`${arcLen} ${circumference - arcLen}`}
+                transform="rotate(-90 120 120)"
+              />
+              <circle
+                cx="120"
+                cy="120"
+                r={r}
+                fill="none"
+                stroke="var(--sage-leaf)"
+                strokeWidth="9"
+                strokeLinecap="round"
+                strokeDasharray={`${protPct * arcLen} ${circumference - (protPct * arcLen)}`}
+                transform="rotate(-90 120 120)"
+                className="plate-arc"
+              />
 
-            {/* Segment Track 2: Carbs (Bottom-Right, 90° to 180° -> 0° offset) */}
-            <circle
-              cx="120"
-              cy="120"
-              r={r}
-              fill="none"
-              stroke="#fcf2dc"
-              strokeWidth="9"
-              strokeDasharray={`${arcLen} ${circumference - arcLen}`}
-              transform="rotate(0 120 120)"
-            />
-            <circle
-              cx="120"
-              cy="120"
-              r={r}
-              fill="none"
-              stroke="var(--mustard)"
-              strokeWidth="9"
-              strokeLinecap="round"
-              strokeDasharray={`${carbPct * arcLen} ${circumference - (carbPct * arcLen)}`}
-              transform="rotate(0 120 120)"
-              className="plate-arc"
-            />
+              {/* Segment Track 2: Carbs (Bottom-Right, 90° to 180° -> 0° offset) */}
+              <circle
+                cx="120"
+                cy="120"
+                r={r}
+                fill="none"
+                stroke="#fcf2dc"
+                strokeWidth="9"
+                strokeDasharray={`${arcLen} ${circumference - arcLen}`}
+                transform="rotate(0 120 120)"
+              />
+              <circle
+                cx="120"
+                cy="120"
+                r={r}
+                fill="none"
+                stroke="var(--mustard)"
+                strokeWidth="9"
+                strokeLinecap="round"
+                strokeDasharray={`${carbPct * arcLen} ${circumference - (carbPct * arcLen)}`}
+                transform="rotate(0 120 120)"
+                className="plate-arc"
+              />
 
-            {/* Segment Track 3: Fat (Bottom-Left, 180° to 270° -> 90° offset) */}
-            <circle
-              cx="120"
-              cy="120"
-              r={r}
-              fill="none"
-              stroke="#faeae4"
-              strokeWidth="9"
-              strokeDasharray={`${arcLen} ${circumference - arcLen}`}
-              transform="rotate(90 120 120)"
-            />
-            <circle
-              cx="120"
-              cy="120"
-              r={r}
-              fill="none"
-              stroke="var(--terracotta)"
-              strokeWidth="9"
-              strokeLinecap="round"
-              strokeDasharray={`${fatPct * arcLen} ${circumference - (fatPct * arcLen)}`}
-              transform="rotate(90 120 120)"
-              className="plate-arc"
-            />
+              {/* Segment Track 3: Fat (Bottom-Left, 180° to 270° -> 90° offset) */}
+              <circle
+                cx="120"
+                cy="120"
+                r={r}
+                fill="none"
+                stroke="#faeae4"
+                strokeWidth="9"
+                strokeDasharray={`${arcLen} ${circumference - arcLen}`}
+                transform="rotate(90 120 120)"
+              />
+              <circle
+                cx="120"
+                cy="120"
+                r={r}
+                fill="none"
+                stroke="var(--terracotta)"
+                strokeWidth="9"
+                strokeLinecap="round"
+                strokeDasharray={`${fatPct * arcLen} ${circumference - (fatPct * arcLen)}`}
+                transform="rotate(90 120 120)"
+                className="plate-arc"
+              />
 
-            {/* Segment Track 4: Fibre (Top-Left, 270° to 360° -> 180° offset) */}
-            <circle
-              cx="120"
-              cy="120"
-              r={r}
-              fill="none"
-              stroke="#f0f3e6"
-              strokeWidth="9"
-              strokeDasharray={`${arcLen} ${circumference - arcLen}`}
-              transform="rotate(180 120 120)"
-            />
-            <circle
-              cx="120"
-              cy="120"
-              r={r}
-              fill="none"
-              stroke="var(--olive)"
-              strokeWidth="9"
-              strokeLinecap="round"
-              strokeDasharray={`${fibrePct * arcLen} ${circumference - (fibrePct * arcLen)}`}
-              transform="rotate(180 120 120)"
-              className="plate-arc"
-            />
-          </svg>
+              {/* Segment Track 4: Fibre (Top-Left, 270° to 360° -> 180° offset) */}
+              <circle
+                cx="120"
+                cy="120"
+                r={r}
+                fill="none"
+                stroke="#f0f3e6"
+                strokeWidth="9"
+                strokeDasharray={`${arcLen} ${circumference - arcLen}`}
+                transform="rotate(180 120 120)"
+              />
+              <circle
+                cx="120"
+                cy="120"
+                r={r}
+                fill="none"
+                stroke="var(--olive)"
+                strokeWidth="9"
+                strokeLinecap="round"
+                strokeDasharray={`${fibrePct * arcLen} ${circumference - (fibrePct * arcLen)}`}
+                transform="rotate(180 120 120)"
+                className="plate-arc"
+              />
+            </svg>
+          )}
 
           {/* Plate Center: Energetic Numerical Hub */}
           <div className="plate-center-hub">
