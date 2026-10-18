@@ -40,16 +40,19 @@ Most generic calorie trackers fail on Indian cuisine—they misjudge composite g
 ## Features
 
 - 🍛 **Authentic Indian Food Logging:** Search 1,014 verified Indian recipes and staples. Log by standard weights (grams) or traditional Indian household measures (katoris, rotis, tablespoons, cups, pieces).
-- 🤖 **Agentic AI Coach with Streaming Responses:** Real-time conversational coach answering dietary questions, reviewing daily meals, and providing personalized recommendations via Server-Sent Events (SSE).
+- ✨ **Spatial 3D & Pantry Almanac Experience:** Crafted product-film aesthetics featuring warm tungsten lighting, brushed steel, terracotta, and procedural Three.js/React Three Fiber components (`TodayPlate3D`, `HydrationJar3D`, `VitaminShelf3D`, and interactive `CoachOrb`).
+- 📖 **The Story Almanac (`/story`):** Cinematic 5-act narrative journey demonstrating the 1,014 IFCT food composition dataset, nutrient gaps, and real-time ledger mechanics.
+- 🤖 **Agentic AI Coach with Streaming Responses:** Real-time conversational coach answering dietary questions, reviewing daily meals, and providing personalized recommendations via Server-Sent Events (SSE) paired with an active Fibonacci point-cloud `CoachOrb`.
 - 🎙️ **Voice Chat:** Hands-free English voice input using browser Speech Recognition for effortless food logging and chat.
 - 🥗 **Indian Meal Planning:** Intelligent meal plans tailored to target caloric ranges, regional preferences, and dietary restrictions (vegetarian, vegan, high-protein).
 - 🛒 **Smart Grocery Generator:** Automatically aggregates raw ingredients and staple quantities needed for planned meals.
 - 🔔 **Native Web Push Notifications:** Lock-screen PWA notifications via VAPID Web Push (plus optional SMTP email reminders) for water, logging, and meal check-ins.
-- 💧 **Apothecary Hydration Tracking:** Visual water carboy tracker with quick-logging increments (+250 ml glass, +500 ml mug, +1.0 L bottle).
+- 💧 **Apothecary Hydration Tracking:** Visual water carboy tracker with quick-logging increments (+250 ml glass, +500 ml mug, +1.0 L bottle) with fluid 3D glass and wave simulation.
 - ⚖️ **Weight & Trend Analytics:** Historical weight tracking, deficit/surplus pacing, and projected goal target dates.
-- 📅 **Consistency Heatmap:** 5-week GitHub-style activity matrix tracking daily logging streaks and nutritional adherence.
+- 📅 **Consistency Heatmap:** 5-week GitHub-style activity matrix tracking daily logging streaks and nutritional adherence with botanical sage and forest tokens.
 - 🍳 **Custom Foods & Recipe Builder:** Break down home-cooked meals by ingredient. Combines raw staples (`backend/ingredient_reference.py`) with deterministic mathematical summing.
 - 🛡️ **Data Quality Gate:** Flags unrealistic serving densities or Atwater formula discrepancies before suggestions are surfaced to the user.
+- ⚡ **Adaptive Quality Tiers:** Dynamically adapts GPU rendering across `high`, `mid`, `low`, and `none` tiers with zero-cost 2D fallbacks, preserving strict sub-125 kB first-load performance.
 
 ---
 
