@@ -1,7 +1,19 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { Info, Sparkles, ChevronDown } from "lucide-react";
+
+const VitaminShelf3D = dynamic(() => import("./VitaminShelf3D"), { ssr: false });
+
+function hasWebGL() {
+  try {
+    const c = document.createElement("canvas");
+    return !!(c.getContext("webgl2") || c.getContext("webgl"));
+  } catch {
+    return false;
+  }
+}
 
 export type MicronutrientItem = {
   key: string;
@@ -44,6 +56,23 @@ export function VitaminShelf({
   className = "",
 }: VitaminShelfProps) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [can3D, setCan3D] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [inView, setInView] = useState(true);
+  const [view3D, setView3D] = useState(true);
+  const shelfRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    setIsMobile(window.innerWidth < 768);
+    setCan3D(!prefersReduced && hasWebGL());
+
+    const el = shelfRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([e]) => setInView(e.isIntersecting), { rootMargin: "100px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   const displayList = items && items.length > 0 ? items : DEFAULT_SLOTS;
   const isAvailable = status === "ok" && items && items.length > 0;
@@ -58,6 +87,16 @@ export function VitaminShelf({
         <div className="shelf-legend">
           <span className="legend-pip vit"><i /> Vitamins</span>
           <span className="legend-pip min"><i /> Minerals</span>
+          {can3D && (
+            <button
+              type="button"
+              className="stamp-tag cream"
+              style={{ cursor: "pointer", border: "1px solid var(--border-rule)", fontSize: "10px", padding: "2px 8px" }}
+              onClick={() => setView3D(!view3D)}
+            >
+              {view3D ? "Switch to 2D" : "Switch to 3D"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -71,8 +110,37 @@ export function VitaminShelf({
       )}
 
       {/* Apothecary Wooden Ledge Rack */}
-      <div className="shelf-rack-stage">
-        <div className="shelf-jars-grid">
+      <div className="shelf-rack-stage" ref={shelfRef}>
+        {can3D && view3D ? (
+          <div>
+            <VitaminShelf3D
+              items={displayList}
+              activeKey={activeKey}
+              onSelect={(key) => setActiveKey(activeKey === key ? null : key)}
+              mobile={isMobile}
+              active={inView}
+            />
+            {/* Quick Nutrient Label strip */}
+            <div style={{ display: "flex", justifyContent: "space-around", marginTop: "6px", flexWrap: "wrap", gap: "4px" }}>
+              {displayList.slice(0, 12).map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setActiveKey(activeKey === item.key ? null : item.key)}
+                  className={`shelf-jar-col ${item.group} ${item.amount === null ? "unknown" : ""} ${activeKey === item.key ? "selected" : ""}`}
+                  style={{ border: "none", background: "transparent", cursor: "pointer", minWidth: "50px" }}
+                >
+                  <span className="jar-title">{item.name}</span>
+                  <span className="jar-status-sub almanac-mono tabular">
+                    {item.amount === null ? "—" : `${item.pct ?? 0}%`}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="shelf-jars-grid">
           {displayList.map((item) => {
             const isUnknown = item.amount === null;
             const pct = item.pct ?? 0;
@@ -158,6 +226,8 @@ export function VitaminShelf({
 
         {/* Ledge Wood Plank */}
         <div className="shelf-wood-ledge" />
+          </>
+        )}
       </div>
 
       {/* Expanded Drawer Details for Active Jar */}
