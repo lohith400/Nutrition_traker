@@ -22,6 +22,10 @@ const HydrationJar3D = dynamic(() => import("../../components/HydrationJar3D"), 
 const VitaminShelf3D = dynamic(() => import("../../components/VitaminShelf3D"), {
   ssr: false,
 });
+import type { CoachOrbState } from "../../components/CoachOrb";
+const CoachOrb = dynamic(() => import("../../components/CoachOrb"), {
+  ssr: false,
+});
 
 export default function Dev3DTestPage() {
   const tier = useQualityTier();
@@ -39,6 +43,9 @@ export default function Dev3DTestPage() {
 
   // Interactive apothecary canister state for testing 3D Vitamin Shelf
   const [activeCanisterKey, setActiveCanisterKey] = useState<string | null>("iron");
+
+  // Interactive Coach Orb state for testing CoachOrb
+  const [orbState, setOrbState] = useState<CoachOrbState>("streaming");
 
   // Scroll mode toggle: defaults to 100% native hardware scrolling (never gets stuck)
   const [smoothScrollEnabled, setSmoothScrollEnabled] = useState(false);
@@ -474,6 +481,71 @@ export default function Dev3DTestPage() {
                       </p>
                     </div>
                   )}
+                </div>
+              </div>
+            </ScrollReveal>
+          </div>
+
+          {/* Card 4: CoachOrb (Spanning full width) */}
+          <div style={{ gridColumn: "1 / -1" }}>
+            <ScrollReveal>
+              <div
+                style={{
+                  background: "#ffffff",
+                  border: "1px solid #e5ded0",
+                  borderRadius: 16,
+                  overflow: "hidden",
+                  boxShadow: "0 6px 24px rgba(28,58,43,0.06)",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                <div style={{ padding: "18px 22px", borderBottom: "1px solid #f0eae0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                  <div>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#10b981", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                      Benchmark 04 · The Living Coach Aura
+                    </span>
+                    <h3 style={{ margin: "4px 0 0 0", fontSize: 20, fontFamily: "var(--font-serif, serif)" }}>
+                      The AI Coach Particle Orb (CoachOrb)
+                    </h3>
+                    <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "#5b8266" }}>
+                      Spherical particle field responding dynamically to streaming tool states, voice phases, and user interaction.
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {(["idle", "listening", "thinking", "streaming", "tool_active", "success"] as CoachOrbState[]).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setOrbState(s)}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 16,
+                          border: orbState === s ? "1px solid #1c3a2b" : "1px solid #dcd5c7",
+                          background: orbState === s ? "#1c3a2b" : "#faf8f2",
+                          color: orbState === s ? "#ffffff" : "#1c3a2b",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          textTransform: "capitalize",
+                          transition: "all 0.15s ease",
+                        }}
+                      >
+                        {s.replace("_", " ")}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    height: 260,
+                    position: "relative",
+                    background: "radial-gradient(circle at 50% 50%, #152d21 0%, #0b1a13 85%)",
+                    display: "grid",
+                    placeItems: "center",
+                  }}
+                >
+                  <CoachOrb state={orbState} size={150} />
                 </div>
               </div>
             </ScrollReveal>
