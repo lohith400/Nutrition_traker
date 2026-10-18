@@ -205,7 +205,7 @@ export default function Dev3DTestPage() {
               {/* 3D Canvas or 2D Fallback */}
               <div
                 style={{
-                  height: 340,
+                  height: 380,
                   position: "relative",
                   background: "radial-gradient(circle at 50% 50%, #f7f3ea 0%, #ede5d5 100%)",
                   display: "grid",
@@ -291,7 +291,7 @@ export default function Dev3DTestPage() {
               {/* 3D Canvas or 2D Fallback */}
               <div
                 style={{
-                  height: 340,
+                  height: 380,
                   position: "relative",
                   background: "radial-gradient(circle at 50% 50%, #f7f3ea 0%, #ede5d5 100%)",
                   display: "grid",

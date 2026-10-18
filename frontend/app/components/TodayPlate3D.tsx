@@ -89,7 +89,7 @@ function PlateMesh({
     const t = clock.getElapsedTime();
     if (root.current) {
       const targetRotY = pointer.x * 0.24 + Math.sin(t * 0.5) * 0.03;
-      const targetRotX = -pointer.y * 0.18 + Math.PI * 0.26;
+      const targetRotX = -pointer.y * 0.18 + Math.PI * 0.22;
       root.current.rotation.y += (targetRotY - root.current.rotation.y) * 0.05;
       root.current.rotation.x += (targetRotX - root.current.rotation.x) * 0.05;
     }
@@ -111,7 +111,7 @@ function PlateMesh({
   const bowlRadius = 1.08;
 
   return (
-    <group ref={root} rotation={[Math.PI * 0.26, 0, 0]}>
+    <group ref={root} rotation={[Math.PI * 0.22, 0, 0]}>
       {/* Base Brushed Steel Thali */}
       <mesh material={steelMat} receiveShadow>
         <cylinderGeometry args={[1.78, 1.54, 0.14, mobile ? 40 : 64]} />
@@ -194,7 +194,7 @@ export default function TodayPlate3D({
       <Canvas
         frameloop={active ? "always" : "demand"}
         dpr={[1, caps.dpr]}
-        camera={{ position: [0, 2.7, 3.4], fov: 36 }}
+        camera={{ position: [0, 3.6, 4.2], fov: 34 }}
         gl={{
           antialias: tier !== "low",
           alpha: true,

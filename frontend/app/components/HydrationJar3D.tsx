@@ -199,7 +199,7 @@ export default function HydrationJar3D({
       <Canvas
         frameloop="always"
         dpr={[1, caps.dpr]}
-        camera={{ position: [0, 0.35, 3.2], fov: 40 }}
+        camera={{ position: [0, 0.2, 4.4], fov: 36 }}
         gl={{
           antialias: tier !== "low",
           alpha: true,
