@@ -1,6 +1,7 @@
 # NutriSync
 
 [![CI](https://github.com/lohith400/Nutrition_traker/actions/workflows/ci.yml/badge.svg)](https://github.com/lohith400/Nutrition_traker/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/lohith400/Nutrition_traker/branch/main/graph/badge.svg)](https://codecov.io/gh/lohith400/Nutrition_traker)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688.svg)](https://fastapi.tiangolo.com/)
@@ -8,7 +9,11 @@
 
 > **An agentic AI nutrition coach and macro tracker crafted specifically for authentic Indian food, combining verified dietary datasets with a deterministic math engine.**
 
-🔗 **Live Web App:** [https://nutrition-traker.vercel.app](https://nutrition-traker.vercel.app)
+🔗 **Live Web App:** [https://nutrition-traker.vercel.app](https://nutrition-traker.vercel.app) &nbsp;|&nbsp; 📖 **Architecture:** [How It Works](docs/HOW_IT_WORKS.md)
+
+<!-- DEMO: uncomment after adding docs/demo/demo.gif
+<p align="center"><img src="docs/demo/demo.gif" alt="NutriSync demo" width="800"></p>
+-->
 
 ---
 
@@ -17,7 +22,7 @@
 Most generic calorie trackers fail on Indian cuisine—they misjudge composite gravies, lack regional preparations, and hallucinate portion weights.
 
 **NutriSync** solves this with a purpose-built dual architecture:
-1. **Agentic AI & Food RAG:** Coordinates food matching, meal planning, and contextual coaching using a zero-crash LLM cascade (Google Gemini, OpenRouter, DeepSeek).
+1. **Agentic AI & Food RAG:** Coordinates food matching, meal planning, and contextual coaching using a multi-provider LLM fallback (Google Gemini, OpenRouter, DeepSeek).
 2. **Deterministic Math Engine:** Pure, testable Python functions compute basal metabolic rate (BMR), total daily energy expenditure (TDEE), macronutrient distributions, and ICMR Recommended Dietary Allowances (RDA). **The language model never performs raw calorie arithmetic.**
 3. **Curated Indian Food Database:** 1,014 verified Indian foods sourced from the **Indian Food Composition Tables (IFCT / ICMR-NIN)** and the **Anuvaad** project, enforced with an automated data-quality gate.
 
@@ -25,6 +30,7 @@ Most generic calorie trackers fail on Indian cuisine—they misjudge composite g
 
 ## Screenshots
 
+<!-- SCREENSHOTS: uncomment after adding dashboard.png, food-log.png, chat-coach.png, and progress.png to docs/screenshots/
 | Daily Dashboard & Macro Thali | Smart Food & Recipe Logging |
 | :---: | :---: |
 | ![Daily Dashboard](docs/screenshots/dashboard.png) | ![Food Logging](docs/screenshots/food-log.png) |
@@ -32,8 +38,9 @@ Most generic calorie trackers fail on Indian cuisine—they misjudge composite g
 | AI Coach Chat (Streaming + Voice) | Progress & Consistency Heatmap |
 | :---: | :---: |
 | ![AI Coach Chat](docs/screenshots/chat-coach.png) | ![Progress Tracking](docs/screenshots/progress.png) |
+-->
 
-*(Screenshots can be placed in `docs/screenshots/`)*
+*(Screenshots can be added to `docs/screenshots/`)*
 
 ---
 
@@ -146,7 +153,7 @@ flowchart TD
 │   ├── food_quality.py        # Anuvaad dataset quality gate & Atwater validation
 │   ├── ingredient_reference.py# Built-in reference values for everyday staples
 │   ├── db_setup.py            # Database schema setup & dataset loader
-│   ├── llm_config.py          # Zero-crash multi-model fallback cascade
+│   ├── llm_config.py          # Multi-provider LLM fallback
 │   ├── reminders.py           # Native Web Push and email reminder dispatch
 │   ├── data/                  # Source nutritional data (anuvaad.xlsx)
 │   ├── requirements.txt       # Production Python dependencies
@@ -167,10 +174,16 @@ flowchart TD
 ├── docker/                    # Docker initialization scripts
 ├── docs/                      # Technical documentation & guides
 │   ├── DATA_SOURCES.md        # Dataset provenance, citations & quality metrics
+│   ├── DEMO_SCRIPT.md         # 60-second walkthrough demo recording script
 │   ├── DEPLOYMENT.md          # Production operations & container deployment
+│   ├── FREE_DEPLOYMENT.md     # Free-tier cloud setup (Render + Turso + Vercel)
+│   ├── HOW_IT_WORKS.md        # System architecture, sequence diagrams & design choices
+│   ├── demo/                  # Video demo and animated GIF slot (.gitkeep)
 │   └── screenshots/           # Application screenshots
 ├── scripts/                   # Utility scripts (e.g. generate_vapid_keys.py)
-├── tests/                     # Automated smoke and integration tests
+├── tests/                     # Automated unit and smoke test suites
+│   ├── unit/                  # Deterministic unit tests (math engine, food matching, quality)
+│   └── test_smoke.py          # End-to-end FastAPI integration smoke tests
 ├── .env.example               # Root environment configuration template
 ├── CONTRIBUTING.md            # Contribution guidelines
 ├── CODE_OF_CONDUCT.md         # Community code of conduct
@@ -280,7 +293,7 @@ NutriSync runs out-of-the-box locally with SQLite without external services. For
 
 ## Deployment & Production Architecture
 
-NutriSync is deployed in a cost-effective, zero-downtime architecture:
+NutriSync is deployed in a cost-effective architecture with automated deploys, health checks, and automatic rollback:
 
 1. **Frontend on Vercel:**
    - Next.js 14 client deployed on Vercel edge infrastructure.
@@ -291,8 +304,8 @@ NutriSync is deployed in a cost-effective, zero-downtime architecture:
 3. **Database on Turso:**
    - Serverless `libsql` edge database enabling persistent data across ephemeral container deployments without disk lock contention.
 4. **Automated CI/CD:**
-   - **Continuous Integration (`ci.yml`):** Runs Ruff linting, Pytest smoke test suites, TypeScript type checks, and Next.js builds on every pull request and push to `main`.
-   - **Continuous Deployment (`deploy.yml`):** On changes to backend, docker, or test code, GitHub Actions validates tests and safely triggers production deployment over SSH with health verification.
+   - **Continuous Integration (`ci.yml`):** Runs Ruff linting, Pytest smoke test suites, unit tests with coverage reporting, TypeScript type checks, and Next.js builds on every pull request and push to `main`.
+   - **Continuous Deployment (`deploy.yml`):** On changes to backend, docker, or test code, GitHub Actions validates tests and safely triggers production deployment over SSH with health verification and automatic rollback.
 
 *(For detailed operations, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/FREE_DEPLOYMENT.md](docs/FREE_DEPLOYMENT.md)).*
 
@@ -300,14 +313,17 @@ NutriSync is deployed in a cost-effective, zero-downtime architecture:
 
 ## Testing & Quality Assurance
 
-Run the test suite and linters locally before pushing changes:
+Run the unit tests, smoke tests, and linters locally before pushing changes:
 
 ```bash
+# Run unit tests with coverage
+pytest tests/unit --cov=backend --cov-report=term-missing --cov-report=xml
+
+# Run backend integration smoke tests
+pytest -v tests/test_smoke.py
+
 # Lint Python codebase with Ruff
 ruff check .
-
-# Run backend smoke tests
-pytest -v tests/test_smoke.py
 
 # Lint and typecheck frontend
 cd frontend
