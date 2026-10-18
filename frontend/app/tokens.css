@@ -236,6 +236,37 @@ body::before {
   --duration-normal: 600ms;
   --duration-slow: 1000ms;
   --duration-cinematic: 1400ms;
+  --duration-hero: 1200ms;
+  --duration-reveal: 800ms;
+  --duration-micro: 250ms;
+}
+
+/* CSS Scroll-Driven Animations (@supports with fallback) */
+@supports (animation-timeline: view()) {
+  .css-scroll-reveal {
+    animation: reveal-fade-up linear both;
+    animation-timeline: view();
+    animation-range: entry 10% cover 30%;
+  }
+
+  @keyframes reveal-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(28px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+/* Fallback visibility when scroll-driven animations are unsupported */
+@supports not (animation-timeline: view()) {
+  .css-scroll-reveal {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* Focus ring for WCAG accessibility */
