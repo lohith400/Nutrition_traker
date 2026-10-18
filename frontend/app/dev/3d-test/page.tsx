@@ -326,44 +326,60 @@ export default function Dev3DTestPage() {
           </div>
 
           {/* Interactive Water Controls */}
-          <div style={{ padding: "18px 22px", background: "#fcfbf7", borderTop: "1px solid #f0eae0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <span style={{ fontSize: 12, color: "#6c6659", display: "block" }}>Current Intake</span>
-              <strong style={{ fontSize: 18, color: "#2c7a91", fontFamily: "var(--font-mono, monospace)" }}>
-                {waterL.toFixed(2)} / {targetWaterL.toFixed(1)} L
-              </strong>
+          <div style={{ padding: "18px 22px", background: "#fcfbf7", borderTop: "1px solid #f0eae0", display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#6c6659", textTransform: "uppercase", letterSpacing: "0.06em" }}>Water Intake</span>
+                <strong style={{ fontSize: 18, color: "#2c7a91", fontFamily: "var(--font-mono, monospace)", display: "block" }}>
+                  {waterL.toFixed(2)} / {targetWaterL.toFixed(1)} L ({Math.round((waterL / targetWaterL) * 100)}%)
+                </strong>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => setWaterL((w) => Math.min(targetWaterL, Number((w + 0.25).toFixed(2))))}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: 8,
+                    background: "#2c7a91",
+                    color: "#ffffff",
+                    border: 0,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    boxShadow: "0 2px 6px rgba(44,122,145,0.25)",
+                  }}
+                >
+                  +250 ml (Wobble)
+                </button>
+                <button
+                  onClick={() => setWaterL(0.5)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    background: "#ece7dc",
+                    color: "#1c3a2b",
+                    border: "1px solid #d5cebf",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Empty
+                </button>
+              </div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => setWaterL((w) => Math.min(targetWaterL, Number((w + 0.25).toFixed(2))))}
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: 8,
-                  background: "#2c7a91",
-                  color: "#ffffff",
-                  border: 0,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                +250 ml (Wobble)
-              </button>
-              <button
-                onClick={() => setWaterL(1.0)}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  background: "#ece7dc",
-                  color: "#1c3a2b",
-                  border: "1px solid #d5cebf",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                Reset
-              </button>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12 }}>
+              <span style={{ color: "#6c6659", minWidth: 64 }}>Level:</span>
+              <input
+                type="range"
+                min="0"
+                max={targetWaterL}
+                step="0.05"
+                value={waterL}
+                onChange={(e) => setWaterL(Number(e.target.value))}
+                style={{ flex: 1 }}
+              />
             </div>
           </div>
         </div>
