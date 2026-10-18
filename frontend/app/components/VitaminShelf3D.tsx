@@ -132,6 +132,7 @@ function ShelfScene({
   items?: MicronutrientItem[] | null;
   activeKey?: string | null;
   onSelectKey?: (key: string | null) => void;
+  mobile?: boolean;
 }) {
   const rootGroup = useRef<THREE.Group>(null);
 
