@@ -12,15 +12,20 @@
     "@fontsource-variable/dm-sans": "^5.3.0",
     "@fontsource-variable/fraunces": "^5.3.0",
     "@fontsource/dm-mono": "^5.3.0",
+    "@react-three/fiber": "8.17.10",
+    "gsap": "3.12.5",
+    "lenis": "1.1.14",
     "lucide-react": "^0.468.0",
     "next": "14.2.15",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "three": "0.169.0"
   },
   "devDependencies": {
     "@types/node": "20.14.12",
     "@types/react": "18.3.3",
     "@types/react-dom": "18.3.0",
+    "@types/three": "0.169.0",
     "typescript": "^5.5.4"
   }
 }

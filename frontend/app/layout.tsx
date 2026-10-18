@@ -8,6 +8,7 @@ import "./globals.css";
 import "./enhancements.css";
 import "./polish.css";
 import AccessGate from "./components/AccessGate";
+import ChromeGate from "./components/ChromeGate";
 import GoalBurst from "./components/GoalBurst";
 import QuickAdd from "./components/QuickAdd";
 import WarmUp from "./components/WarmUp";
@@ -32,9 +33,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <AccessGate>{children}</AccessGate>
-        <WarmUp />
-        <QuickAdd />
-        <GoalBurst />
+        <ChromeGate>
+          <WarmUp />
+          <QuickAdd />
+          <GoalBurst />
+        </ChromeGate>
       </body>
     </html>
   );
