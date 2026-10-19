@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/lohith400/Nutrition_traker/actions/workflows/ci.yml/badge.svg)](https://github.com/lohith400/Nutrition_traker/actions/workflows/ci.yml)
 [![Core Engine Coverage](https://img.shields.io/badge/Core%20Engine%20Coverage-94%25-brightgreen.svg)](#testing--quality-assurance)
-[![codecov](https://codecov.io/gh/lohith400/Nutrition_traker/branch/feat%2Ftests-docs-demo/graph/badge.svg)](https://codecov.io)
+[![Coverage](https://img.shields.io/badge/Coverage-76%25-brightgreen.svg)](#testing--quality-assurance)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688.svg)](https://fastapi.tiangolo.com/)
