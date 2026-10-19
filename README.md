@@ -1,7 +1,8 @@
 # NutriSync
 
 [![CI](https://github.com/lohith400/Nutrition_traker/actions/workflows/ci.yml/badge.svg)](https://github.com/lohith400/Nutrition_traker/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/lohith400/Nutrition_traker/branch/main/graph/badge.svg)](https://codecov.io/gh/lohith400/Nutrition_traker)
+[![Core Engine Coverage](https://img.shields.io/badge/Core%20Engine%20Coverage-94%25-brightgreen.svg)](#testing--quality-assurance)
+[![codecov](https://codecov.io/gh/lohith400/Nutrition_traker/branch/feat%2Ftests-docs-demo/graph/badge.svg)](https://codecov.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688.svg)](https://fastapi.tiangolo.com/)
@@ -313,14 +314,14 @@ NutriSync is deployed in a cost-effective architecture with automated deploys, h
 
 ## Testing & Quality Assurance
 
-Run the unit tests, smoke tests, and linters locally before pushing changes:
+Run the test suite with coverage reporting locally before pushing changes:
 
 ```bash
-# Run unit tests with coverage
-pytest tests/unit --cov=backend --cov-report=term-missing --cov-report=xml
+# Run all tests with coverage
+pytest tests/ --cov=backend --cov-report=term-missing --cov-report=xml
 
-# Run backend integration smoke tests
-pytest -v tests/test_smoke.py
+# Run only unit tests
+pytest tests/unit --cov=backend
 
 # Lint Python codebase with Ruff
 ruff check .

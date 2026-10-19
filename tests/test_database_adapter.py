@@ -51,6 +51,7 @@ def test_chat_history_persists_and_feeds_context(tmp_path, monkeypatch):
     from backend import memory_agent
     monkeypatch.setenv("NUTRISYNC_FORCE_LIBSQL", "1")
     monkeypatch.setattr(memory_agent, "DB_PATH", str(tmp_path / "chat.db"))
+    monkeypatch.setattr(memory_agent, "_chat_table_ensured", False)
     for i in range(30):
         memory_agent.save_chat_message("user" if i % 2 == 0 else "assistant", f"turn {i}")
     recent = memory_agent.get_recent_history(limit=10)
@@ -138,8 +139,9 @@ def test_verify_turso_detects_missing_rows(tmp_path, monkeypatch, capsys):
         def connect(url, auth_token=None):
             return libsql.connect(remote_file)
 
-    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://x.turso.io")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://verify.turso.io")
     monkeypatch.setenv("TURSO_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("NUTRISYNC_DB_POOL", "0")
     monkeypatch.setattr(database, "_import_libsql", lambda: FakeLibsql)
     for mod in (migrate_to_turso, verify_turso):
         monkeypatch.setattr(mod, "get_db_connection", database.get_db_connection)

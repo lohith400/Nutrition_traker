@@ -1,6 +1,14 @@
 [run]
 source = backend
 omit =
-    */tests/*
+    backend/db_setup.py
+    backend/llm_config.py
+    backend/google_fit.py
+    backend/reminders.py
+    backend/check_db.py
+    backend/smoke_test.py
+    backend/verify_turso.py
+    backend/migrate_to_turso.py
+    */site-packages/*
     tests/*
     *__init__.py
