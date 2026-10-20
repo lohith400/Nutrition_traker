@@ -815,7 +815,16 @@ def _compute_day_micronutrients(day: str):
             continue
         macros = math_engine.calculate_meal_macros(code, qty, unit)
         if "error" in macros:
-            continue
+            if unit == "serving":
+                conn_tmp = memory_agent._get_conn()
+                try:
+                    f_row = conn_tmp.execute("SELECT serving_grams FROM food_items WHERE food_code = ?", (code,)).fetchone()
+                    if f_row and f_row["serving_grams"]:
+                        macros = math_engine.calculate_meal_macros(code, qty * float(f_row["serving_grams"]), "grams")
+                finally:
+                    conn_tmp.close()
+            if "error" in macros:
+                continue
 
         had_data = False
         # Fibre

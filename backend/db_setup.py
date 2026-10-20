@@ -418,6 +418,15 @@ def ensure_schema(db_path=None) -> None:
     if needs_grading:
         refresh_food_quality(conn)
 
+    has_foods = conn.execute("SELECT COUNT(*) FROM food_items").fetchone()[0]
+    if has_foods > 0:
+        missing_micros = conn.execute(
+            "SELECT COUNT(*) FROM food_items WHERE vitc_mg_100g IS NOT NULL"
+        ).fetchone()[0] == 0
+        if missing_micros:
+            load_foods(conn)
+            refresh_food_quality(conn)
+
     conn.row_factory = None
     has_prefs = conn.execute("SELECT COUNT(*) FROM food_preferences").fetchone()[0]
     has_logs = conn.execute("SELECT COUNT(*) FROM daily_logs").fetchone()[0]
@@ -484,11 +493,17 @@ def seed_if_needed() -> None:
     ensure_schema(DB_PATH)
     conn = get_db_connection(DB_PATH)
     count = conn.execute("SELECT COUNT(*) FROM food_items").fetchone()[0]
-    if count == 0:
+    needs_micros = False
+    if count > 0:
+        needs_micros = conn.execute(
+            "SELECT COUNT(*) FROM food_items WHERE vitc_mg_100g IS NOT NULL"
+        ).fetchone()[0] == 0
+
+    if count == 0 or needs_micros:
         inserted = load_foods(conn)
         refresh_food_quality(conn)
         conn.commit()
-        print(f"Seeded {inserted} foods.")
+        print(f"Seeded {inserted} foods (populated full micronutrients).")
     else:
         print(f"Database ready ({count} foods already loaded, user data untouched).")
     conn.close()

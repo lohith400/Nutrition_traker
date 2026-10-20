@@ -81,17 +81,39 @@ export function buildBloomItems(args: {
     { key: "fat", label: "Fat", short: "Fat", group: "macro", tone: TONES.fat, amount: args.fat, target: args.fatTarget, unit: "g", pct: ratio(args.fat, args.fatTarget) },
     { key: "fibre", label: "Dietary fibre", short: "Fib", group: "macro", tone: TONES.fibre, amount: args.fibre, target: args.fibreTarget, unit: "g", pct: ratio(args.fibre, args.fibreTarget) },
   ];
-  const byKey = new Map((args.micros || []).map((m) => [m.key, m]));
+  const byKey = new Map<string, MicronutrientItem>();
+  for (const m of args.micros || []) {
+    byKey.set(m.key, m);
+    // Also map key without unit suffix (e.g. "vitc_mg" -> "vitc", "calcium_mg" -> "calcium", "vita_ug" -> "vita")
+    const stripped = m.key.replace(/_(mg|ug|g)$/, "");
+    byKey.set(stripped, m);
+  }
+
+  // Calculate B-complex average percentage if individual B-vitamins exist
+  const bVits = (args.micros || []).filter(
+    (m) => (m.key.startsWith("vitb") || m.key.startsWith("folate")) && m.pct !== null && m.pct !== undefined
+  );
+  const bComplexPct = bVits.length > 0 ? bVits.reduce((acc, v) => acc + (v.pct || 0), 0) / bVits.length : null;
+
   const micros: BloomItem[] = DEFAULT_MICROS.map((d) => {
     const m = byKey.get(d.key);
-    const pct = m && m.pct !== null && m.pct !== undefined ? m.pct / 100 : null;
+    let pct: number | null = null;
+    let amount = m?.amount ?? null;
+
+    if (d.key === "bcomplex") {
+      pct = bComplexPct !== null ? bComplexPct / 100 : null;
+      amount = bComplexPct !== null ? Math.round(bComplexPct) : null;
+    } else if (m && m.pct !== null && m.pct !== undefined) {
+      pct = m.pct / 100;
+    }
+
     return {
       key: d.key,
       label: m?.name || d.name,
       short: m?.symbol || d.symbol,
       group: d.group,
       tone: d.group === "vitamin" ? TONES.vitamin : TONES.mineral,
-      amount: m?.amount ?? null,
+      amount,
       target: m?.target ?? d.target,
       unit: m?.unit || d.unit,
       pct,

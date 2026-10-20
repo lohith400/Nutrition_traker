@@ -179,6 +179,15 @@ def _extract_micros(row, scale: float, prefix: str = "unit_serving_") -> dict:
                 return float(row[col_name])
             except (ValueError, TypeError):
                 return None
+        # Fallback: if serving column was None, calculate from 100g column if serving_grams exists
+        if prefix == "unit_serving_" and "serving_grams" in keys and row["serving_grams"] is not None:
+            try:
+                base_name = col_name[len("unit_serving_"):]
+                col_100g = f"{base_name}_100g"
+                if col_100g in keys and row[col_100g] is not None:
+                    return float(row[col_100g]) * (float(row["serving_grams"]) / 100.0)
+            except (ValueError, TypeError):
+                pass
         return None
 
     def calc(col_name):
