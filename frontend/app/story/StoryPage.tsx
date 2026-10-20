@@ -376,7 +376,10 @@ export default function StoryPage() {
   return (
     <div className={`sx ${lite ? "sx-lite" : ""}`} ref={root}>
       <header className="sx-nav">
-        <span className="sx-brand">NutriSync</span>
+        <span className="sx-brand" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <img src="/logo-icon.png" alt="NutriSync" style={{ width: 26, height: 26, borderRadius: "50%", objectFit: "cover" }} />
+          <span>NutriSync</span>
+        </span>
         <Link href="/" className="sx-btn sx-btn-ink sx-btn-sm">Open the app</Link>
       </header>
 

@@ -481,5 +481,22 @@
   margin: 0;
 }
 
+/* Brand logo in sidebar and headers */
+.brand-logo-img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid rgba(28, 58, 43, 0.15);
+  box-shadow: 0 1px 3px rgba(28, 58, 43, 0.08);
+  display: block;
+}
 
-
+/* Macro boxes for Fat and Fiber */
+.fat-box {
+  min-width: 46px;
+}
+.fiber-box {
+  min-width: 48px;
+}

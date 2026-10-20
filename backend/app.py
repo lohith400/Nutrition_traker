@@ -257,6 +257,8 @@ def enrich_meals_with_nutrients(meals: list) -> None:
             if "error" not in macros:
                 nutrients = macros.get("nutrients") or math_engine.extract_non_zero_nutrients(macros)
                 meal["nutrients"] = nutrients
+                if macros.get("fibre_g") is not None:
+                    meal["fibre_g"] = macros["fibre_g"]
                 cache[cache_key] = nutrients
             else:
                 meal["nutrients"] = []

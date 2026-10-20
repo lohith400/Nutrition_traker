@@ -1216,10 +1216,14 @@ export default function ChatPage() {
                       ) : (
                         <span className="user-initial-fallback">{initial}</span>
                       )
-                    ) : message.streaming ? (
+                    ) : message.streaming && !message.content ? (
                       <CoachOrb state={message.status ? "tool_active" : "streaming"} size={26} />
                     ) : (
-                      <Sparkles size={14} />
+                      <img
+                        src="/logo-icon.png"
+                        alt="NutriSync Coach"
+                        className="coach-av-img"
+                      />
                     )}
                   </div>
                   <div className="chat-bubble-col">
@@ -1272,7 +1276,11 @@ export default function ChatPage() {
             {loading && !messages.some((m) => m.streaming) && (
               <div className="chat-row assistant">
                 <div className="chat-avatar coach-av">
-                  <Sparkles size={14} />
+                  <img
+                    src="/logo-icon.png"
+                    alt="NutriSync Coach"
+                    className="coach-av-img"
+                  />
                 </div>
                 <div className="chat-bubble-col">
                   <div className="chat-bubble assistant typing" aria-label="Coach is composing response">
@@ -1530,6 +1538,27 @@ export default function ChatPage() {
           font-weight: 700;
         }
         .chat-main .chat-row.user .chat-avatar.user-av .user-av-img {
+          width: 100%;
+          height: 100%;
+          border-radius: 9999px;
+          object-fit: cover;
+          border: 1px solid rgba(35, 66, 54, 0.2);
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Coach Message Avatar with Project Logo */
+        .chat-main .chat-row.assistant .chat-avatar.coach-av {
+          background: transparent !important;
+          padding: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          overflow: hidden;
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+        }
+        .chat-main .chat-row.assistant .chat-avatar.coach-av .coach-av-img {
           width: 100%;
           height: 100%;
           border-radius: 9999px;

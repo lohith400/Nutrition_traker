@@ -17,7 +17,7 @@ type NutrientItem = {
 };
 type MealRow = {
   log_id?: number; food_code?: string | null; meal_type: string; food_name: string; quantity: number; unit?: string; serving_label?: string | null;
-  calories: number; protein_g: number; carbs_g: number; fat_g: number; log_time: string;
+  calories: number; protein_g: number; carbs_g: number; fat_g: number; fibre_g?: number | null; log_time: string;
   nutrients?: NutrientItem[];
 };
 type DayEntry = { date: string; meals: MealRow[]; total_calories: number; total_protein_g: number; total_carbs_g: number; total_fat_g: number };
@@ -118,6 +118,13 @@ function EntryRow({ meal, onChanged }: { meal: MealRow; onChanged: () => void })
     return list.filter(n => n && typeof n.amount === "number" && n.amount > 0);
   }, [meal.nutrients, fetchedNutrients]);
 
+  const fiberVal = useMemo(() => {
+    if (typeof meal.fibre_g === "number") return Math.round(meal.fibre_g * 10) / 10;
+    const fromNutrients = nutrientsList.find(n => n.key === "fibre_g" || n.name.toLowerCase().includes("fibre") || n.name.toLowerCase().includes("fiber"));
+    if (fromNutrients && typeof fromNutrients.amount === "number") return Math.round(fromNutrients.amount * 10) / 10;
+    return 0;
+  }, [meal.fibre_g, nutrientsList]);
+
   const toggleNutrients = useCallback(() => {
     if (!showNutrients && (!meal.nutrients || meal.nutrients.length === 0) && meal.food_code && !fetchedNutrients && !loadingNutrients) {
       setLoadingNutrients(true);
@@ -167,6 +174,8 @@ function EntryRow({ meal, onChanged }: { meal: MealRow; onChanged: () => void })
       </div>
       <div className="macro-box"><b className="tabular almanac-mono">{meal.calories}</b><span>kcal</span></div>
       <div className="macro-box protein-box"><b className="tabular almanac-mono">{meal.protein_g}g</b><span>protein</span></div>
+      <div className="macro-box fat-box"><b className="tabular almanac-mono">{meal.fat_g}g</b><span>fat</span></div>
+      <div className="macro-box fiber-box"><b className="tabular almanac-mono">{fiberVal}g</b><span>fiber</span></div>
 
       {/* Vitamins & Nutritional Breakdown Toggle */}
       <button
