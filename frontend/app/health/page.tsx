@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertCircle, Bed, Flame, Footprints, HeartPulse, Info, MapPin, RefreshCw, Scale, Sparkles, Timer, Zap } from "lucide-react";
 import Shell, { API } from "../components/Shell";
 import { ScrollReveal } from "../components/motion/ScrollReveal";
+import { VitaminShelf } from "../components/VitaminShelf";
+import { mapBackendMicrosToShelf } from "../lib/micros";
 import { ActivityMix, BalanceScale, FitnessDay, FoodLab, Extras, InsightList, Insights, MathPanel, PlateRings, Row, Tile, TrendChart, fmt, shortDay } from "./parts";
 
 type FitnessToday = {
@@ -25,6 +27,29 @@ export default function HealthPage() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const autoFilled = useRef(false);
+  const [view, setView] = useState<"movement" | "vitamins">("movement");
+  const [microsData, setMicrosData] = useState<any>(null);
+
+  // Open straight on the vitamins tab from a link like /health#vitamins
+  useEffect(() => {
+    if (window.location.hash === "#vitamins") setView("vitamins");
+  }, []);
+
+  function chooseView(next: "movement" | "vitamins") {
+    setView(next);
+    window.history.replaceState(null, "", next === "vitamins" ? "#vitamins" : window.location.pathname);
+  }
+
+  // Load today's micronutrients whenever the vitamins tab opens
+  useEffect(() => {
+    if (view !== "vitamins") return;
+    let live = true;
+    fetch(`${API}/api/micronutrients/today`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (live) setMicrosData(j || { has_data: false, nutrients: [] }); })
+      .catch(() => { if (live) setMicrosData({ has_data: false, nutrients: [] }); });
+    return () => { live = false; };
+  }, [view]);
 
   async function loadData(r: number = range) {
     try {
@@ -104,6 +129,7 @@ export default function HealthPage() {
             <h1 className="almanac-serif">Health &amp; Movement <span>✦</span></h1>
             <p className="subtitle">What you eat, what you burn, and what it means for your body from your food log and Google Fit.</p>
           </div>
+          {view === "movement" && (
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
             {today?.status === "ok" && <span className="hx-live"><i />Google Fit{today.synced_at ? ` · ${today.synced_at.slice(11, 16)}` : " · live"}</span>}
             <button type="button" className="ghost-btn hx-sync" onClick={triggerSync} disabled={syncing}>
@@ -115,8 +141,16 @@ export default function HealthPage() {
               ))}
             </div>
           </div>
+          )}
         </div>
 
+        <div className="segmented hx-view-tabs" role="tablist" aria-label="Health sections" style={{ marginTop: 18 }}>
+          <button type="button" role="tab" aria-selected={view === "movement"} className={view === "movement" ? "seg active" : "seg"} onClick={() => chooseView("movement")}>Movement &amp; energy</button>
+          <button type="button" role="tab" aria-selected={view === "vitamins"} className={view === "vitamins" ? "seg active" : "seg"} onClick={() => chooseView("vitamins")}>Vitamins &amp; minerals</button>
+        </div>
+
+        {view === "movement" ? (
+        <>
         {error && <div className="notice-banner"><Sparkles size={16} />{error}</div>}
 
         {!isConfigured && (
@@ -242,6 +276,19 @@ export default function HealthPage() {
             )}
           </section>
         </div>
+        </>
+        ) : (
+          <ScrollReveal>
+            <div className="hx-section-title">
+              <h2>Vitamins &amp; minerals</h2>
+              <p>Today&apos;s intake against your daily reference amounts. Tap a jar to see which foods supplied it.</p>
+            </div>
+            <VitaminShelf
+              items={mapBackendMicrosToShelf(microsData)}
+              status={microsData ? (microsData.has_data ? "ok" : "not_available") : "loading"}
+            />
+          </ScrollReveal>
+        )}
       </div>
     </Shell>
   );

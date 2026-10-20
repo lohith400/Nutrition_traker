@@ -26,52 +26,10 @@ import { DATA_CHANGED } from "./components/QuickAdd";
 import { FoodOption, FoodOptionList } from "./components/FoodOptions";
 import { TodayPlate } from "./components/TodayPlate";
 import { HydrationJar } from "./components/HydrationJar";
-import { VitaminShelf, MicronutrientItem } from "./components/VitaminShelf";
+import { mapBackendMicrosToShelf } from "./lib/micros";
 import { FoodGlyph } from "./components/art/FoodGlyph";
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
-
-function mapBackendMicrosToShelf(backendData: any): MicronutrientItem[] | null {
-  if (!backendData || !backendData.nutrients) return null;
-  const symbols: Record<string, string> = {
-    calcium_mg: "Ca",
-    magnesium_mg: "Mg",
-    sodium_mg: "Na",
-    potassium_mg: "K+",
-    iron_mg: "Fe",
-    copper_mg: "Cu",
-    zinc_mg: "Zn",
-    vita_ug: "A",
-    vitc_mg: "C",
-    vitd_ug: "D",
-    vite_mg: "E",
-    vitk_ug: "K",
-    folate_ug: "B₉",
-    vitb1_mg: "B₁",
-    vitb2_mg: "B₂",
-    vitb3_mg: "B₃",
-    vitb5_mg: "B₅",
-    vitb6_mg: "B₆",
-    vitb7_ug: "B₇",
-  };
-
-  return backendData.nutrients
-    .filter((n: any) => n.key !== "fibre_g")
-    .map((n: any) => ({
-      key: n.key,
-      name: n.name,
-      symbol: symbols[n.key] || n.name.slice(0, 2),
-      group: n.category === "vitamin" ? "vitamin" : "mineral",
-      amount: n.amount,
-      target: n.rda || 100,
-      unit: n.unit,
-      pct: n.pct_rda,
-      topFoods: (n.top_foods || []).map((f: any) => ({
-        food_name: f.food_name,
-        amount: `${f.amount} ${n.unit}`,
-      })),
-    }));
-}
 
 type Profile = {
   status?: string;
@@ -453,6 +411,7 @@ export default function Page() {
           fatTarget={budget?.target_fat_g || 0}
           fibre={microsData?.totals?.fibre_g || 0}
           fibreTarget={microsData?.rdas?.fibre_g || 30}
+          micros={mapBackendMicrosToShelf(microsData)}
           meals={meals}
           greeting={greeting}
           userName={name}
@@ -520,12 +479,6 @@ export default function Page() {
             disabled={loading}
           />
         </div>
-
-        {/* Micronutrient Vitamin & Mineral Shelf */}
-        <VitaminShelf
-          items={mapBackendMicrosToShelf(microsData)}
-          status={microsData ? (microsData.has_data ? "ok" : "not_available") : "loading"}
-        />
 
         {/* Activity & Physical Movement from Google Fit */}
         <div className="section-header" style={{ marginTop: "36px" }}>

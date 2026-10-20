@@ -13,13 +13,7 @@ import { SplitTextHeadline } from "../../components/motion/SplitTextHeadline";
 import { ScrollReveal } from "../../components/motion/ScrollReveal";
 
 // Dynamically import 3D components with SSR disabled to enforce bundle budget
-const TodayPlate3D = dynamic(() => import("../../components/TodayPlate3D"), {
-  ssr: false,
-});
 const HydrationJar3D = dynamic(() => import("../../components/HydrationJar3D"), {
-  ssr: false,
-});
-const VitaminShelf3D = dynamic(() => import("../../components/VitaminShelf3D"), {
   ssr: false,
 });
 import type { CoachOrbState } from "../../components/CoachOrb";
@@ -216,92 +210,6 @@ export default function Dev3DTestPage() {
         {/* Main 3D Component Benchmarks */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 28, marginBottom: 44 }}>
           
-          {/* Card 1: TodayPlate3D */}
-          <ScrollReveal>
-            <div
-              style={{
-                background: "#ffffff",
-                border: "1px solid #e5ded0",
-                borderRadius: 16,
-                overflow: "hidden",
-                boxShadow: "0 6px 24px rgba(28,58,43,0.06)",
-                display: "flex",
-                flexDirection: "column",
-              }}
-            >
-              <div style={{ padding: "18px 22px", borderBottom: "1px solid #f0eae0" }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#d48c28", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                  Benchmark 01 · Authentic Metalwork
-                </span>
-                <h3 style={{ margin: "4px 0 0 0", fontSize: 20, fontFamily: "var(--font-serif, serif)" }}>
-                  The Almanac Thali (TodayPlate3D)
-                </h3>
-                <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "#5b8266" }}>
-                  Brushed steel plate, brass rolled rim, 4 quadrant katoris with interactive pointer tilt.
-                </p>
-              </div>
-
-              {/* 3D Canvas or 2D Fallback */}
-              <div
-                style={{
-                  height: 380,
-                  position: "relative",
-                  background: "radial-gradient(circle at 50% 50%, #f7f3ea 0%, #ede5d5 100%)",
-                  display: "grid",
-                  placeItems: "center",
-                }}
-              >
-                {caps.render3D ? (
-                  <TodayPlate3D
-                    protPct={protein / 100}
-                    carbPct={carbs / 100}
-                    fatPct={fat / 100}
-                    fibrePct={fibre / 100}
-                    active={true}
-                  />
-                ) : (
-                  <div style={{ textAlign: "center", padding: 20 }}>
-                    <svg viewBox="0 0 200 200" style={{ width: 150, height: 150, margin: "0 auto 12px auto", display: "block" }}>
-                      <circle cx="100" cy="100" r="92" fill="#ded7c7" stroke="#bfae92" strokeWidth="4" />
-                      <circle cx="100" cy="100" r="82" fill="none" stroke="#cfc5b4" strokeWidth="1.2" strokeDasharray="3 2" />
-                      <circle cx="70" cy="70" r="23" fill="#5b8266" opacity={protein / 100} stroke="#44614d" strokeWidth="1.5" />
-                      <circle cx="130" cy="70" r="23" fill="#d48c28" opacity={carbs / 100} stroke="#996319" strokeWidth="1.5" />
-                      <circle cx="70" cy="130" r="23" fill="#c85a32" opacity={fat / 100} stroke="#913b1d" strokeWidth="1.5" />
-                      <circle cx="130" cy="130" r="23" fill="#8ba858" opacity={fibre / 100} stroke="#5b7336" strokeWidth="1.5" />
-                      <circle cx="100" cy="100" r="12" fill="#faf6ee" stroke="#bdae95" strokeWidth="1.5" />
-                    </svg>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#1c3a2b", textTransform: "uppercase" }}>
-                      Archival 2D Steel Thali
-                    </div>
-                    <p style={{ margin: "4px 0 0 0", fontSize: 12, color: "#7a7265" }}>
-                      Zero-overhead vector fallback active under tier: <strong>none</strong>
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Macro Sliders */}
-              <div style={{ padding: "18px 22px", background: "#fcfbf7", borderTop: "1px solid #f0eae0", display: "grid", gap: 10, fontSize: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontWeight: 600, color: "#5b8266" }}>Protein: {protein}%</span>
-                  <input type="range" min="0" max="100" value={protein} onChange={(e) => setProtein(Number(e.target.value))} style={{ width: 140 }} />
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontWeight: 600, color: "#d48c28" }}>Carbohydrates: {carbs}%</span>
-                  <input type="range" min="0" max="100" value={carbs} onChange={(e) => setCarbs(Number(e.target.value))} style={{ width: 140 }} />
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontWeight: 600, color: "#c85a32" }}>Healthy Fats: {fat}%</span>
-                  <input type="range" min="0" max="100" value={fat} onChange={(e) => setFat(Number(e.target.value))} style={{ width: 140 }} />
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontWeight: 600, color: "#8ba858" }}>Dietary Fibre: {fibre}%</span>
-                  <input type="range" min="0" max="100" value={fibre} onChange={(e) => setFibre(Number(e.target.value))} style={{ width: 140 }} />
-                </div>
-              </div>
-            </div>
-          </ScrollReveal>
-
           {/* Card 2: HydrationJar3D */}
           <ScrollReveal delay={0.15}>
             <div
@@ -428,63 +336,6 @@ export default function Dev3DTestPage() {
               </div>
             </div>
           </ScrollReveal>
-
-          {/* Card 3: VitaminShelf3D */}
-          <div style={{ gridColumn: "1 / -1" }}>
-            <ScrollReveal>
-              <div
-                style={{
-                  background: "#ffffff",
-                  border: "1px solid #e5ded0",
-                  borderRadius: 16,
-                  overflow: "hidden",
-                  boxShadow: "0 6px 24px rgba(28,58,43,0.06)",
-                  display: "flex",
-                  flexDirection: "column",
-                }}
-              >
-                <div style={{ padding: "18px 22px", borderBottom: "1px solid #f0eae0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-                  <div>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#8c5674", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                      Benchmark 03 · Apothecary Spice Ledge
-                    </span>
-                    <h3 style={{ margin: "4px 0 0 0", fontSize: 20, fontFamily: "var(--font-serif, serif)" }}>
-                      The Micronutrient Canisters (VitaminShelf3D)
-                    </h3>
-                    <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "#5b8266" }}>
-                      Solid teak wood ledge with 6 turned brass apothecary canisters, luminous botanical fills, and pointer physics.
-                    </p>
-                  </div>
-                  <div style={{ fontSize: 13, color: "#1c3a2b", fontWeight: 600 }}>
-                    Selected Canister: <strong style={{ color: "#c85a32", textTransform: "uppercase" }}>{activeCanisterKey || "None"}</strong>
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    height: 280,
-                    position: "relative",
-                    background: "radial-gradient(circle at 50% 50%, #faf6ee 0%, #ede5d5 100%)",
-                    display: "grid",
-                    placeItems: "center",
-                  }}
-                >
-                  {caps.render3D ? (
-                    <VitaminShelf3D
-                      activeKey={activeCanisterKey}
-                      onSelectKey={setActiveCanisterKey}
-                    />
-                  ) : (
-                    <div style={{ textAlign: "center", padding: 20 }}>
-                      <p style={{ fontSize: 13, color: "#7a7265", margin: 0 }}>
-                        Archival 2D Apothecary Shelf active under tier: <strong>none</strong>
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </ScrollReveal>
-          </div>
 
           {/* Card 4: CoachOrb (Spanning full width) */}
           <div style={{ gridColumn: "1 / -1" }}>
