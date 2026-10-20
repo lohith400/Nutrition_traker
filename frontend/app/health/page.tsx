@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertCircle, Bed, Flame, Footprints, HeartPulse, Info, MapPin, RefreshCw, Scale, Sparkles, Timer, Zap } from "lucide-react";
 import Shell, { API } from "../components/Shell";
+import { ScrollReveal } from "../components/motion/ScrollReveal";
+import { VitaminShelf } from "../components/VitaminShelf";
+import { mapBackendMicrosToShelf } from "../lib/micros";
 import { ActivityMix, BalanceScale, FitnessDay, FoodLab, Extras, InsightList, Insights, MathPanel, PlateRings, Row, Tile, TrendChart, fmt, shortDay } from "./parts";
 
 type FitnessToday = {
@@ -24,6 +27,29 @@ export default function HealthPage() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const autoFilled = useRef(false);
+  const [view, setView] = useState<"movement" | "vitamins">("movement");
+  const [microsData, setMicrosData] = useState<any>(null);
+
+  // Open straight on the vitamins tab from a link like /health#vitamins
+  useEffect(() => {
+    if (window.location.hash === "#vitamins") setView("vitamins");
+  }, []);
+
+  function chooseView(next: "movement" | "vitamins") {
+    setView(next);
+    window.history.replaceState(null, "", next === "vitamins" ? "#vitamins" : window.location.pathname);
+  }
+
+  // Load today's micronutrients whenever the vitamins tab opens
+  useEffect(() => {
+    if (view !== "vitamins") return;
+    let live = true;
+    fetch(`${API}/api/micronutrients/today`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (live) setMicrosData(j || { has_data: false, nutrients: [] }); })
+      .catch(() => { if (live) setMicrosData({ has_data: false, nutrients: [] }); });
+    return () => { live = false; };
+  }, [view]);
 
   async function loadData(r: number = range) {
     try {
@@ -103,6 +129,7 @@ export default function HealthPage() {
             <h1 className="almanac-serif">Health &amp; Movement <span>✦</span></h1>
             <p className="subtitle">What you eat, what you burn, and what it means for your body from your food log and Google Fit.</p>
           </div>
+          {view === "movement" && (
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
             {today?.status === "ok" && <span className="hx-live"><i />Google Fit{today.synced_at ? ` · ${today.synced_at.slice(11, 16)}` : " · live"}</span>}
             <button type="button" className="ghost-btn hx-sync" onClick={triggerSync} disabled={syncing}>
@@ -114,8 +141,16 @@ export default function HealthPage() {
               ))}
             </div>
           </div>
+          )}
         </div>
 
+        <div className="segmented hx-view-tabs" role="tablist" aria-label="Health sections" style={{ marginTop: 18 }}>
+          <button type="button" role="tab" aria-selected={view === "movement"} className={view === "movement" ? "seg active" : "seg"} onClick={() => chooseView("movement")}>Movement &amp; energy</button>
+          <button type="button" role="tab" aria-selected={view === "vitamins"} className={view === "vitamins" ? "seg active" : "seg"} onClick={() => chooseView("vitamins")}>Vitamins &amp; minerals</button>
+        </div>
+
+        {view === "movement" ? (
+        <>
         {error && <div className="notice-banner"><Sparkles size={16} />{error}</div>}
 
         {!isConfigured && (
@@ -141,7 +176,7 @@ export default function HealthPage() {
         )}
 
         {/* ---- Hero: the scale and the plate ---- */}
-        <div className="hx-hero">
+        <ScrollReveal className="hx-hero">
           <section className="hx-card hx-warm">
             <div className="hx-card-head"><div><h3>Energy balance</h3><p>Food on one pan, movement on the other (today so far)</p></div></div>
             <BalanceScale eaten={eatenToday} burned={Math.round(kcalToday)} />
@@ -151,42 +186,46 @@ export default function HealthPage() {
             <div className="hx-card-head"><div><h3>Today&apos;s plate</h3><p>Three rings, one plate. Hover a ring for detail</p></div></div>
             <PlateRings steps={stepsToday} kcal={Math.round(kcalToday)} active={activeToday} kcalGoal={kcalGoal} />
           </section>
-        </div>
+        </ScrollReveal>
 
         {/* ---- Everything Google Fit gives us ---- */}
-        <div className="hx-section-title"><h2>From Google Fit</h2><p>Today, with the last {Math.max(history.length, 1)} days as a trend line</p></div>
-        <div className="hx-tiles">
-          <Tile icon={<Footprints size={16} />} color="#c99a2e" label="Steps" num={stepsToday} sub={`${Math.round(stepsToday / 100)}% of 10,000`} spark={spark(d => d.steps)} />
-          <Tile icon={<MapPin size={16} />} color="#3f8f86" label="Distance" num={distanceToday} decimals={1} unit="km" sub={today?.distance_source === "google_fit" ? "Measured by Fit" : "Estimated from steps"} spark={spark(d => d.distance_km ?? 0)} />
-          <Tile icon={<Flame size={16} />} color="#d0704f" label="Calories burned" num={Math.round(kcalToday)} unit="kcal" sub="Resting + active" spark={spark(d => d.calories_burned)} />
-          <Tile icon={<Timer size={16} />} color="#6b4fb8" label="Move minutes" num={activeToday} unit="min" sub="Goal 30 min" spark={spark(d => d.active_minutes ?? 0)} />
-          <Tile icon={<Zap size={16} />} color="#2f7d5b" label="Heart points" num={ex.heart_points ?? null} decimals={0} sub="Goal 150 / week" spark={spark(d => d.extras?.heart_points)} missing={missing.has("activity")} hint="Needs activity scope" />
-          <Tile icon={<HeartPulse size={16} />} color="#c4506b" label="Heart rate" num={ex.hr_avg ?? null} unit="bpm" sub={ex.hr_min ? `Range ${ex.hr_min}–${ex.hr_max} bpm` : undefined} spark={spark(d => d.extras?.hr_avg)} missing={missing.has("body")} hint="Needs body scope" />
-          <Tile icon={<Bed size={16} />} color="#5a74b8" label="Sleep" text={sleep} sub="Last night" spark={spark(d => d.extras?.sleep_minutes)} missing={missing.has("sleep")} hint="Needs sleep scope" />
-          <Tile icon={<Scale size={16} />} color="#8a6a3a" label="Weight" num={ex.weight_kg ?? null} decimals={1} unit="kg" sub={ins ? `Target ${ins.profile.target_weight_kg} kg` : "Latest reading"} spark={spark(d => d.extras?.weight_kg)} missing={missing.has("body")} hint="Needs body scope" />
-        </div>
-        {missingList.length > 0 && (
-          <div className="hx-note"><Info size={15} />
-            <span>Google did not return {missingList.map(g => g).join(", ")} data. Either your watch/phone doesn&apos;t record it, or your refresh token was created without these scopes: {missingList.map(g => SCOPE_NAMES[g]).join(", ")}. Re-authorize with them in OAuth Playground and update the refresh token in <code>backend/.env</code>.</span>
+        <ScrollReveal delay={0.08}>
+          <div className="hx-section-title"><h2>From Google Fit</h2><p>Today, with the last {Math.max(history.length, 1)} days as a trend line</p></div>
+          <div className="hx-tiles">
+            <Tile icon={<Footprints size={16} />} color="#c99a2e" label="Steps" num={stepsToday} sub={`${Math.round(stepsToday / 100)}% of 10,000`} spark={spark(d => d.steps)} />
+            <Tile icon={<MapPin size={16} />} color="#3f8f86" label="Distance" num={distanceToday} decimals={1} unit="km" sub={today?.distance_source === "google_fit" ? "Measured by Fit" : "Estimated from steps"} spark={spark(d => d.distance_km ?? 0)} />
+            <Tile icon={<Flame size={16} />} color="#d0704f" label="Calories burned" num={Math.round(kcalToday)} unit="kcal" sub="Resting + active" spark={spark(d => d.calories_burned)} />
+            <Tile icon={<Timer size={16} />} color="#6b4fb8" label="Move minutes" num={activeToday} unit="min" sub="Goal 30 min" spark={spark(d => d.active_minutes ?? 0)} />
+            <Tile icon={<Zap size={16} />} color="#2f7d5b" label="Heart points" num={ex.heart_points ?? null} decimals={0} sub="Goal 150 / week" spark={spark(d => d.extras?.heart_points)} missing={missing.has("activity")} hint="Needs activity scope" />
+            <Tile icon={<HeartPulse size={16} />} color="#c4506b" label="Heart rate" num={ex.hr_avg ?? null} unit="bpm" sub={ex.hr_min ? `Range ${ex.hr_min}–${ex.hr_max} bpm` : undefined} spark={spark(d => d.extras?.hr_avg)} missing={missing.has("body")} hint="Needs body scope" />
+            <Tile icon={<Bed size={16} />} color="#5a74b8" label="Sleep" text={sleep} sub="Last night" spark={spark(d => d.extras?.sleep_minutes)} missing={missing.has("sleep")} hint="Needs sleep scope" />
+            <Tile icon={<Scale size={16} />} color="#8a6a3a" label="Weight" num={ex.weight_kg ?? null} decimals={1} unit="kg" sub={ins ? `Target ${ins.profile.target_weight_kg} kg` : "Latest reading"} spark={spark(d => d.extras?.weight_kg)} missing={missing.has("body")} hint="Needs body scope" />
           </div>
-        )}
+          {missingList.length > 0 && (
+            <div className="hx-note"><Info size={15} />
+              <span>Google did not return {missingList.map(g => g).join(", ")} data. Either your watch/phone doesn&apos;t record it, or your refresh token was created without these scopes: {missingList.map(g => SCOPE_NAMES[g]).join(", ")}. Re-authorize with them in OAuth Playground and update the refresh token in <code>backend/.env</code>.</span>
+            </div>
+          )}
+        </ScrollReveal>
 
         {/* ---- Trend ---- */}
-        <section className="hx-card hx-chart-card">
-          <div className="panel-head">
-            <div>
-              <h3>{mode === "energy" ? "Eaten vs burned" : "Daily steps"}</h3>
-              <p>{mode === "energy" ? `Bars are what you burned, the line is what you ate. Numbers under each day are the balance. Last ${range} days.` : `Dashed line is your 10,000 step goal. Last ${range} days.`}</p>
+        <ScrollReveal delay={0.12}>
+          <section className="hx-card hx-chart-card">
+            <div className="panel-head">
+              <div>
+                <h3>{mode === "energy" ? "Eaten vs burned" : "Daily steps"}</h3>
+                <p>{mode === "energy" ? `Bars are what you burned, the line is what you ate. Numbers under each day are the balance. Last ${range} days.` : `Dashed line is your 10,000 step goal. Last ${range} days.`}</p>
+              </div>
+              <div className="segmented" role="group" aria-label="Chart metric">
+                <button className={mode === "energy" ? "seg active" : "seg"} onClick={() => setMode("energy")} aria-pressed={mode === "energy"}>Energy</button>
+                <button className={mode === "steps" ? "seg active" : "seg"} onClick={() => setMode("steps")} aria-pressed={mode === "steps"}>Steps</button>
+              </div>
             </div>
-            <div className="segmented" role="group" aria-label="Chart metric">
-              <button className={mode === "energy" ? "seg active" : "seg"} onClick={() => setMode("energy")} aria-pressed={mode === "energy"}>Energy</button>
-              <button className={mode === "steps" ? "seg active" : "seg"} onClick={() => setMode("steps")} aria-pressed={mode === "steps"}>Steps</button>
-            </div>
-          </div>
-          {loading ? <p className="empty-state">Loading activity data…</p>
-            : trackedDays === 0 && stepsToday === 0 ? <p className="empty-state">No fitness data recorded yet for the last {range} days. Press Sync Fit and your history will fill in.</p>
-            : <TrendChart rows={rows} mode={mode} target={mode === "steps" ? 10000 : kcalGoal} calTarget={mode === "energy" ? ins?.profile.target_calories : undefined} />}
-        </section>
+            {loading ? <p className="empty-state">Loading activity data…</p>
+              : trackedDays === 0 && stepsToday === 0 ? <p className="empty-state">No fitness data recorded yet for the last {range} days. Press Sync Fit and your history will fill in.</p>
+              : <TrendChart rows={rows} mode={mode} target={mode === "steps" ? 10000 : kcalGoal} calTarget={mode === "energy" ? ins?.profile.target_calories : undefined} />}
+          </section>
+        </ScrollReveal>
 
         {/* ---- Maths + insights ---- */}
         {ins ? (
@@ -237,6 +276,19 @@ export default function HealthPage() {
             )}
           </section>
         </div>
+        </>
+        ) : (
+          <ScrollReveal>
+            <div className="hx-section-title">
+              <h2>Vitamins &amp; minerals</h2>
+              <p>Today&apos;s intake against your daily reference amounts. Tap a jar to see which foods supplied it.</p>
+            </div>
+            <VitaminShelf
+              items={mapBackendMicrosToShelf(microsData)}
+              status={microsData ? (microsData.has_data ? "ok" : "not_available") : "loading"}
+            />
+          </ScrollReveal>
+        )}
       </div>
     </Shell>
   );

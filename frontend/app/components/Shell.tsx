@@ -8,6 +8,7 @@ import {
   Bell,
   ChefHat,
   ChevronRight,
+  Compass,
   HeartPulse,
   Home,
   Leaf,
@@ -212,6 +213,16 @@ export default function Shell({ active, crumb, actions, className = "", children
         </nav>
 
         <div className="sidebar-footer">
+          <Link
+            className="nav-item"
+            href="/story"
+            onClick={() => setSidebarOpen(false)}
+            style={{ color: "#c85a32", fontWeight: 600 }}
+          >
+            <span className="chapter-num" style={{ color: "#c85a32" }}>✦</span>
+            <Compass size={17} />
+            <span>Story Almanac</span>
+          </Link>
           <Link
             className={active === "chat" ? "nav-item active" : "nav-item"}
             href="/chat"

@@ -99,8 +99,8 @@
 .wt-history li{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #f2efe8}.wt-history li span{flex:1;color:var(--muted)}
 .consistency{margin-top:16px}.streak{display:flex;align-items:center;gap:6px;padding:7px 12px;background:#fdeede;color:#b0702f;border-radius:999px;font-size:12px}.streak b{font-size:16px}
 .heat{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:14px;max-width:420px}.heat-lbl{text-align:center;color:var(--soft);font-size:10px}
-.heat-cell{aspect-ratio:1;border-radius:7px;background:#f3f0e8;transition:transform .15s}.heat-cell:hover{transform:scale(1.12)}
-.heat-cell.l1,.heat-scale .l1{background:#dbe8dd}.heat-cell.l2,.heat-scale .l2{background:#b3cdb9}.heat-cell.l3,.heat-scale .l3{background:#7fa68e}.heat-cell.l4,.heat-scale .l4{background:var(--green-dark)}.heat-cell.future{opacity:.35}
+.heat-cell{aspect-ratio:1;border-radius:6px;background:var(--paper-dim,#f3eee4);border:1px solid rgba(0,0,0,0.04);transition:transform .15s,box-shadow .15s}.heat-cell:hover{transform:scale(1.15);box-shadow:0 2px 8px rgba(0,0,0,0.08)}
+.heat-cell.l1,.heat-scale .l1{background:#d5e4d9;border-color:rgba(82,117,99,0.2)}.heat-cell.l2,.heat-scale .l2{background:#8fad97;border-color:rgba(62,93,78,0.3)}.heat-cell.l3,.heat-scale .l3{background:#3e5d4e;border-color:rgba(43,70,57,0.4)}.heat-cell.l4,.heat-scale .l4{background:#1c3a2b;border-color:#d48c28}.heat-cell.future{opacity:.35}
 .heat-legend{display:flex;justify-content:space-between;max-width:420px;margin-top:10px;font-size:11px;color:var(--muted)}.heat-scale{display:flex;align-items:center;gap:4px}.heat-scale i{width:12px;height:12px;border-radius:3px;display:inline-block}
 
 /* grocery + meal plans */

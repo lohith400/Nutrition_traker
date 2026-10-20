@@ -1,0 +1,36 @@
+/* Daily Bloom: scoped with .bloom prefix */
+.bloom { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.bloom-wrap { position: relative; width: min(100%, 348px); aspect-ratio: 1 / 1; container-type: inline-size; }
+.bloom-svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.bloom-petal { cursor: pointer; transition: opacity 0.25s ease; outline: none; }
+.bloom-petal path { transition: stroke-width 0.2s ease, stroke 0.2s ease; }
+.bloom-petal.is-active path:nth-of-type(2) { stroke: #fff; stroke-opacity: 0.9; stroke-width: 1.6; filter: drop-shadow(0 2px 5px rgba(44, 38, 28, 0.28)); }
+.bloom-petal:focus-visible path:first-of-type { stroke: var(--ink, #2c261c); stroke-width: 1.4; }
+.bloom-label { font-family: var(--font-mono, ui-monospace, monospace); font-size: 9.5px; letter-spacing: 0.04em; transition: opacity 0.25s ease; pointer-events: none; }
+
+.bloom-hub { position: absolute; left: 50%; top: 50%; width: 29%; aspect-ratio: 1 / 1; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; gap: 1px; }
+.bloom-hub-eyebrow { font-family: var(--font-mono, ui-monospace, monospace); font-size: clamp(7px, 2.6cqw, 9.5px); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted, #8a8272); max-width: 100%; line-height: 1.1; }
+.bloom-hub-num { font-size: clamp(22px, 8.6cqw, 32px); font-weight: 700; line-height: 1; color: var(--ink, #2c261c); }
+.bloom-hub-sub { font-size: clamp(8px, 2.9cqw, 10.5px); color: var(--muted, #8a8272); letter-spacing: 0.03em; line-height: 1.15; }
+
+.bloom-legend { display: flex; gap: 16px; font-size: 11.5px; color: var(--ink-light, #5a5446); }
+.bloom-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.bloom-legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.bloom-hint { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--muted, #8a8272); text-align: center; max-width: 320px; }
+
+.bloom-foot { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px 14px; margin-top: 2px; }
+.bloom-meals { display: flex; gap: 6px; }
+.bloom-chip { width: 34px; height: 34px; border-radius: 50%; background: #fff; border: 1px solid var(--border-rule, #e7dfcd); display: grid; place-items: center; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.07); animation: bloomChip 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+@keyframes bloomChip { from { opacity: 0; transform: translateY(8px) scale(0.85); } to { opacity: 1; transform: none; } }
+
+/* Make room for the larger bloom in the hero card */
+.today-plate-hero .plate-stage { grid-template-columns: 372px 1fr; }
+@media (max-width: 920px) {
+  .today-plate-hero .plate-stage { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bloom-chip { animation: none; }
+  .bloom-petal, .bloom-petal path, .bloom-label { transition: none; }
+}
+
+.bloom-link { color: var(--tomato, #b84e37); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }

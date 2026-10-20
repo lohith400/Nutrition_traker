@@ -55,9 +55,11 @@ export function VitaminShelf({
           <span className="almanac-eyebrow">APOTHECARY PANTRY</span>
           <h3 className="almanac-serif">Vitamins &amp; Minerals Shelf</h3>
         </div>
-        <div className="shelf-legend">
-          <span className="legend-pip vit"><i /> Vitamins</span>
-          <span className="legend-pip min"><i /> Minerals</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div className="shelf-legend">
+            <span className="legend-pip vit"><i /> Vitamins</span>
+            <span className="legend-pip min"><i /> Minerals</span>
+          </div>
         </div>
       </div>
 

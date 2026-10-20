@@ -133,18 +133,27 @@ export function WeightTracker({ goalWeight, startWeight, onChange }: { goalWeigh
           {chart && (
             <div className="wt-chart">
               <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Weight over time" onMouseLeave={() => setHover(null)}>
-                {[0, 0.5, 1].map(f => { const v = chart.lo + (chart.hi - chart.lo) * f; const yy = chart.y(v); return <g key={f}><line x1={PX} x2={W - 14} y1={yy} y2={yy} stroke="#efeae0" /><text x={PX - 6} y={yy + 4} textAnchor="end" fontSize="10" fill="#9b9a93">{v.toFixed(1)}</text></g>; })}
-                {goalWeight != null && <g><line x1={PX} x2={W - 14} y1={chart.y(goalWeight)} y2={chart.y(goalWeight)} stroke="#4a6559" strokeDasharray="5 4" /><text x={W - 16} y={chart.y(goalWeight) - 5} textAnchor="end" fontSize="10" fill="#4a6559">goal {goalWeight}</text></g>}
-                <path d={chart.line} fill="none" stroke="#2f4d42" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+                <defs>
+                  <linearGradient id="wtGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#3e5d4e" stopOpacity="0.18" />
+                    <stop offset="100%" stopColor="#3e5d4e" stopOpacity="0.0" />
+                  </linearGradient>
+                </defs>
+                {[0, 0.5, 1].map(f => { const v = chart.lo + (chart.hi - chart.lo) * f; const yy = chart.y(v); return <g key={f}><line x1={PX} x2={W - 14} y1={yy} y2={yy} stroke="#e5dfd3" strokeDasharray="3 3" /><text x={PX - 6} y={yy + 4} textAnchor="end" fontSize="10" fill="#7f7b70" className="almanac-mono">{v.toFixed(1)}</text></g>; })}
+                {goalWeight != null && <g><line x1={PX} x2={W - 14} y1={chart.y(goalWeight)} y2={chart.y(goalWeight)} stroke="#c85a32" strokeDasharray="5 4" strokeWidth="1.2" /><text x={W - 16} y={chart.y(goalWeight) - 5} textAnchor="end" fontSize="10" fill="#c85a32" className="almanac-mono">target {goalWeight} kg</text></g>}
+                {chart.pts.length > 1 && (
+                  <path d={`${chart.line} L ${chart.pts[chart.pts.length - 1].x},${H - PY} L ${chart.pts[0].x},${H - PY} Z`} fill="url(#wtGradient)" />
+                )}
+                <path d={chart.line} fill="none" stroke="#22382e" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
                 {chart.pts.map((p, i) => (
                   <g key={p.e.log_date}>
-                    <circle cx={p.x} cy={p.y} r={hover === i ? 6 : 4} fill="#fff" stroke="#2f4d42" strokeWidth="2" />
-                    <circle cx={p.x} cy={p.y} r="14" fill="transparent" onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />
+                    <circle cx={p.x} cy={p.y} r={hover === i ? 6 : 4} fill="#faf6ee" stroke="#22382e" strokeWidth="2" />
+                    <circle cx={p.x} cy={p.y} r="14" fill="transparent" onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} style={{ cursor: "pointer" }} />
                   </g>
                 ))}
                 {hover != null && chart.pts[hover] && (() => {
                   const p = chart.pts[hover]; const left = p.x > W - 130;
-                  return <g><rect x={left ? p.x - 112 : p.x + 10} y={p.y - 34} width="102" height="36" rx="8" fill="#22221e" /><text x={left ? p.x - 61 : p.x + 61} y={p.y - 19} textAnchor="middle" fontSize="11" fill="#fff" fontWeight="700">{p.e.weight_kg} kg</text><text x={left ? p.x - 61 : p.x + 61} y={p.y - 6} textAnchor="middle" fontSize="10" fill="#cfd6cf">{new Date(`${p.e.log_date}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</text></g>;
+                  return <g><rect x={left ? p.x - 116 : p.x + 10} y={p.y - 36} width="106" height="38" rx="8" fill="#1c1b18" stroke="#3e5d4e" strokeWidth="1" /><text x={left ? p.x - 63 : p.x + 63} y={p.y - 20} textAnchor="middle" fontSize="12" fill="#faf6ee" fontWeight="700" className="almanac-serif">{p.e.weight_kg} kg</text><text x={left ? p.x - 63 : p.x + 63} y={p.y - 6} textAnchor="middle" fontSize="9.5" fill="#d5cca8" className="almanac-mono">{new Date(`${p.e.log_date}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</text></g>;
                 })()}
               </svg>
             </div>

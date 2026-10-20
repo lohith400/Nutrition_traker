@@ -25,10 +25,14 @@ import {
   X,
 } from "lucide-react";
 import Shell, { API } from "../components/Shell";
+import dynamic from "next/dynamic";
 import { useVoiceChat } from "../hooks/useVoiceChat";
 import { FoodOption, FoodOptionList, MacroChips } from "../components/FoodOptions";
 import { NutritionFacts } from "../components/art/NutritionFacts";
 import { streamChat, toolStatusText } from "../lib/chatStream";
+import type { CoachOrbState } from "../components/CoachOrb";
+
+const CoachOrb = dynamic(() => import("../components/CoachOrb"), { ssr: false });
 
 type ToolEvent = { tool: string; args: Record<string, unknown>; result: Record<string, unknown> };
 type ChatMsg = {
@@ -859,6 +863,18 @@ export default function ChatPage() {
 
   const voice = useVoiceChat({ onUtterance: sendText });
 
+  const isStreamingAny = messages.some((m) => m.streaming);
+  const activeStreamingMsg = messages.find((m) => m.streaming);
+  const coachState: CoachOrbState = voice.phase === "listening"
+    ? "listening"
+    : voice.phase === "thinking" || (loading && !isStreamingAny)
+    ? "thinking"
+    : isStreamingAny && activeStreamingMsg?.status
+    ? "tool_active"
+    : isStreamingAny
+    ? "streaming"
+    : "idle";
+
   async function send(event: FormEvent) {
     event.preventDefault();
     const text = input.trim();
@@ -960,19 +976,27 @@ export default function ChatPage() {
       }
     >
       <div className="chat-wrap">
-        <div className="chat-intro">
-          <div className="almanac-eyebrow">
-            <span>INTELLIGENT DIALOGUE</span>
-            <span className="dot-sep">·</span>
-            <span>AI COACH</span>
+        <div className="chat-intro" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20 }}>
+          <div>
+            <div className="almanac-eyebrow">
+              <span>INTELLIGENT DIALOGUE</span>
+              <span className="dot-sep">·</span>
+              <span>AI COACH</span>
+            </div>
+            <h1 className="almanac-serif">
+              Conversation with your Coach <span>✦</span>
+            </h1>
+            <p className="subtitle">
+              Type, speak aloud, upload meal photos for ingredient vision identification, or search food places. The coach
+              cross-references your actual logged targets before recommending actions.
+            </p>
           </div>
-          <h1 className="almanac-serif">
-            Conversation with your Coach <span>✦</span>
-          </h1>
-          <p className="subtitle">
-            Type, speak aloud, upload meal photos for ingredient vision identification, or search food places. The coach
-            cross-references your actual logged targets before recommending actions.
-          </p>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flexShrink: 0, marginTop: 4 }}>
+            <CoachOrb state={coachState} size={60} />
+            <span style={{ fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", color: "#6c6659", fontFamily: "var(--font-mono, monospace)", fontWeight: 700 }}>
+              {coachState}
+            </span>
+          </div>
         </div>
 
         <div className="chat-days" role="tablist" aria-label="Chat days">
@@ -1068,9 +1092,7 @@ export default function ChatPage() {
             {!historyLoaded && <p className="empty-state">Loading conversation…</p>}
             {historyLoaded && messages.length === 0 && (
               <div className="chat-empty">
-                <div className="coach-badge chat-empty-badge">
-                  <Sparkles size={20} />
-                </div>
+                <CoachOrb state={coachState} size={68} />
                 {isToday ? (
                   <p>
                     No messages yet today. Type, snap a photo, or tap the mic and say:{" "}
@@ -1111,6 +1133,8 @@ export default function ChatPage() {
                       ) : (
                         <span className="user-initial-fallback">{initial}</span>
                       )
+                    ) : message.streaming ? (
+                      <CoachOrb state={message.status ? "tool_active" : "streaming"} size={26} />
                     ) : (
                       <Sparkles size={14} />
                     )}
