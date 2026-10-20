@@ -75,6 +75,8 @@ export function FoodOptionRow({ option, defaultQty = 1, defaultUnit = "serving",
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState<LoggedInfo | null>(null);
+  const [optNutrients, setOptNutrients] = useState<Array<{ key: string; name: string; amount: number; unit: string; category: string }> | null>(null);
+  const [loadingOptNutrients, setLoadingOptNutrients] = useState(false);
 
   const q = parseFloat(qty);
   const valid = Number.isFinite(q) && q > 0 && q <= 2000;
@@ -188,6 +190,59 @@ export function FoodOptionRow({ option, defaultQty = 1, defaultUnit = "serving",
                 fat_g={preview ? preview.fat_g : (headline?.fat_g || 0)}
                 compact
               />
+            </div>
+          </details>
+
+          {/* More Nutritional Information (Vitamins & Minerals) */}
+          <details
+            className="fo-more"
+            style={{ marginBottom: "10px" }}
+            onToggle={(e) => {
+              if ((e.currentTarget as HTMLDetailsElement).open && !optNutrients && !loadingOptNutrients && option.food_code) {
+                setLoadingOptNutrients(true);
+                fetch(`${API}/api/food-nutrients?code=${encodeURIComponent(option.food_code)}&quantity=${valid ? q : 1}&unit=${unit}`)
+                  .then(r => r.json())
+                  .then(d => {
+                    if (Array.isArray(d.nutrients)) {
+                      setOptNutrients(d.nutrients);
+                    }
+                  })
+                  .catch(() => {})
+                  .finally(() => setLoadingOptNutrients(false));
+              }
+            }}
+          >
+            <summary
+              className="almanac-mono"
+              style={{
+                cursor: "pointer",
+                fontSize: "11px",
+                color: "var(--forest-green, #1c3a2b)",
+                fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+              }}
+            >
+              <Sparkles size={12} style={{ color: "var(--ochre, #d48c28)" }} />
+              <span>More nutritional info (Vitamins &amp; Minerals) ▾</span>
+            </summary>
+            <div style={{ marginTop: "8px" }}>
+              {loadingOptNutrients ? (
+                <p className="nutrient-empty-text">Loading vitamins &amp; minerals…</p>
+              ) : optNutrients && optNutrients.filter(n => n && typeof n.amount === "number" && n.amount > 0).length > 0 ? (
+                <div className="nutrient-grid" style={{ marginTop: "6px" }}>
+                  {optNutrients.filter(n => n && typeof n.amount === "number" && n.amount > 0).map(n => (
+                    <div className={`nutrient-card ${n.category}`} key={n.key}>
+                      <div className="nutrient-card-name" title={n.name}>{n.name}</div>
+                      <div className="nutrient-card-val tabular">{n.amount} <small>{n.unit}</small></div>
+                      <div className="nutrient-card-cat">{n.category}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : optNutrients ? (
+                <p className="nutrient-empty-text">No non-zero vitamins or minerals recorded for this item.</p>
+              ) : null}
             </div>
           </details>
 

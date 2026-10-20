@@ -639,6 +639,48 @@ function ToolCard({
           </div>
         </details>
 
+        {/* More Nutritional Information (Vitamins & Minerals) */}
+        {(() => {
+          const rawNutrients = Array.isArray(result.nutrients)
+            ? (result.nutrients as Array<{ key: string; name: string; amount: number; unit: string; category: string }>)
+            : [];
+          const nonZero = rawNutrients.filter(n => n && typeof n.amount === "number" && n.amount > 0);
+          return (
+            <details className="fo-more" style={{ marginTop: "8px" }}>
+              <summary
+                className="almanac-mono"
+                style={{
+                  cursor: "pointer",
+                  fontSize: "11px",
+                  color: "var(--forest-green, #1c3a2b)",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                }}
+              >
+                <Sparkles size={12} style={{ color: "var(--ochre, #d48c28)" }} />
+                <span>More nutritional info (Vitamins &amp; Minerals) ▾</span>
+              </summary>
+              <div style={{ marginTop: "8px" }}>
+                {nonZero.length > 0 ? (
+                  <div className="nutrient-grid" style={{ marginTop: "6px" }}>
+                    {nonZero.map(n => (
+                      <div className={`nutrient-card ${n.category}`} key={n.key}>
+                        <div className="nutrient-card-name" title={n.name}>{n.name}</div>
+                        <div className="nutrient-card-val tabular">{n.amount} <small>{n.unit}</small></div>
+                        <div className="nutrient-card-cat">{n.category}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="nutrient-empty-text">No non-zero vitamins or minerals recorded for this item.</p>
+                )}
+              </div>
+            </details>
+          );
+        })()}
+
         {typeof result.data_quality_warning === "string" && (
           <div className="tool-card-note">{result.data_quality_warning}</div>
         )}
@@ -668,10 +710,51 @@ function ToolCard({
         </div>
       );
     }
+    const rawNutrients = Array.isArray(result.nutrients)
+      ? (result.nutrients as Array<{ key: string; name: string; amount: number; unit: string; category: string }>)
+      : [];
+    const nonZero = rawNutrients.filter(n => n && typeof n.amount === "number" && n.amount > 0);
     return (
-      <div className="tool-card tool-card-logged">
-        <CheckCircle2 size={14} /> Logged <b>{String(result.matched_to)}</b> — {String(result.calories)} kcal,{" "}
-        {String(result.protein_g)}g protein.
+      <div className="tool-card tool-card-logged" style={{ display: "block" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+          <CheckCircle2 size={14} />
+          <span>
+            Logged <b>{String(result.matched_to)}</b> — {String(result.calories)} kcal,{" "}
+            {String(result.protein_g)}g protein.
+          </span>
+        </div>
+        <details className="fo-more" style={{ marginTop: "8px" }}>
+          <summary
+            className="almanac-mono"
+            style={{
+              cursor: "pointer",
+              fontSize: "11px",
+              color: "var(--forest-green, #1c3a2b)",
+              fontWeight: 600,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+            }}
+          >
+            <Sparkles size={12} style={{ color: "var(--ochre, #d48c28)" }} />
+            <span>More nutritional info (Vitamins &amp; Minerals) ▾</span>
+          </summary>
+          <div style={{ marginTop: "8px" }}>
+            {nonZero.length > 0 ? (
+              <div className="nutrient-grid" style={{ marginTop: "6px" }}>
+                {nonZero.map(n => (
+                  <div className={`nutrient-card ${n.category}`} key={n.key}>
+                    <div className="nutrient-card-name" title={n.name}>{n.name}</div>
+                    <div className="nutrient-card-val tabular">{n.amount} <small>{n.unit}</small></div>
+                    <div className="nutrient-card-cat">{n.category}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="nutrient-empty-text">No non-zero vitamins or minerals recorded for this item.</p>
+            )}
+          </div>
+        </details>
       </div>
     );
   }
