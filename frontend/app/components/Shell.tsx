@@ -165,7 +165,7 @@ export default function Shell({ active, crumb, actions, className = "", children
       {/* Main navigation sidebar / mobile slide-out drawer */}
       <aside className={`sidebar ${sidebarOpen ? "mobile-open" : ""}`} aria-label="Main Navigation">
         <div className="brand">
-          <span className="brand-badge"><Sparkles size={18} /></span>
+          <img src="/logo-icon.png" alt="NutriSync" className="brand-logo-img" />
           <span className="brand-word">Nutri<em>Sync</em></span>
           <button
             type="button"

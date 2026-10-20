@@ -8,9 +8,17 @@ import { FoodGlyph } from "../components/art/FoodGlyph";
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
+type NutrientItem = {
+  key: string;
+  name: string;
+  category: "macro" | "mineral" | "vitamin";
+  unit: string;
+  amount: number;
+};
 type MealRow = {
   log_id?: number; food_code?: string | null; meal_type: string; food_name: string; quantity: number; unit?: string; serving_label?: string | null;
-  calories: number; protein_g: number; carbs_g: number; fat_g: number; log_time: string;
+  calories: number; protein_g: number; carbs_g: number; fat_g: number; fibre_g?: number | null; log_time: string;
+  nutrients?: NutrientItem[];
 };
 type DayEntry = { date: string; meals: MealRow[]; total_calories: number; total_protein_g: number; total_carbs_g: number; total_fat_g: number };
 type Pattern = { pattern_type: string; description: string; detected_on: string };
@@ -93,6 +101,9 @@ function WeekStrip({ days, target }: { days: DayEntry[]; target: number }) {
 
 function EntryRow({ meal, onChanged }: { meal: MealRow; onChanged: () => void }) {
   const [editing, setEditing] = useState(false);
+  const [showNutrients, setShowNutrients] = useState(false);
+  const [fetchedNutrients, setFetchedNutrients] = useState<NutrientItem[] | null>(null);
+  const [loadingNutrients, setLoadingNutrients] = useState(false);
   const [qty, setQty] = useState(String(meal.quantity));
   const [unit, setUnit] = useState<"serving" | "grams">(meal.unit === "grams" ? "grams" : "serving");
   const [mt, setMt] = useState<string>(meal.meal_type);
@@ -100,6 +111,35 @@ function EntryRow({ meal, onChanged }: { meal: MealRow; onChanged: () => void })
   const [err, setErr] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
   const canEdit = meal.log_id != null;
+
+  // Enforce zero-exclusion rule: strictly filter to positive amounts
+  const nutrientsList = useMemo(() => {
+    const list = meal.nutrients && meal.nutrients.length > 0 ? meal.nutrients : (fetchedNutrients || []);
+    return list.filter(n => n && typeof n.amount === "number" && n.amount > 0);
+  }, [meal.nutrients, fetchedNutrients]);
+
+  const fiberVal = useMemo(() => {
+    if (typeof meal.fibre_g === "number") return Math.round(meal.fibre_g * 10) / 10;
+    const fromNutrients = nutrientsList.find(n => n.key === "fibre_g" || n.name.toLowerCase().includes("fibre") || n.name.toLowerCase().includes("fiber"));
+    if (fromNutrients && typeof fromNutrients.amount === "number") return Math.round(fromNutrients.amount * 10) / 10;
+    return 0;
+  }, [meal.fibre_g, nutrientsList]);
+
+  const toggleNutrients = useCallback(() => {
+    if (!showNutrients && (!meal.nutrients || meal.nutrients.length === 0) && meal.food_code && !fetchedNutrients && !loadingNutrients) {
+      setLoadingNutrients(true);
+      fetch(`${API}/api/food-nutrients?code=${encodeURIComponent(meal.food_code)}&quantity=${meal.quantity}&unit=${encodeURIComponent(meal.unit || "serving")}`)
+        .then(r => r.json())
+        .then(d => {
+          if (Array.isArray(d.nutrients)) {
+            setFetchedNutrients(d.nutrients);
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoadingNutrients(false));
+    }
+    setShowNutrients(v => !v);
+  }, [showNutrients, meal.nutrients, meal.food_code, meal.quantity, meal.unit, fetchedNutrients, loadingNutrients]);
 
   async function save() {
     setBusy(true); setErr("");
@@ -134,6 +174,22 @@ function EntryRow({ meal, onChanged }: { meal: MealRow; onChanged: () => void })
       </div>
       <div className="macro-box"><b className="tabular almanac-mono">{meal.calories}</b><span>kcal</span></div>
       <div className="macro-box protein-box"><b className="tabular almanac-mono">{meal.protein_g}g</b><span>protein</span></div>
+      <div className="macro-box fat-box"><b className="tabular almanac-mono">{meal.fat_g}g</b><span>fat</span></div>
+      <div className="macro-box fiber-box"><b className="tabular almanac-mono">{fiberVal}g</b><span>fiber</span></div>
+
+      {/* Vitamins & Nutritional Breakdown Toggle */}
+      <button
+        type="button"
+        className={`nutrient-pill-toggle ${showNutrients ? "active" : ""}`}
+        onClick={toggleNutrients}
+        aria-expanded={showNutrients}
+        title="Vitamins & Minerals Breakdown"
+      >
+        <Sparkles size={12} className="sparkle-icon" />
+        <span>Vitamins</span>
+        <ChevronDown size={12} className={`chev-icon ${showNutrients ? "open" : ""}`} />
+      </button>
+
       {canEdit && (
         <div className="entry-actions">
           <button type="button" className="icon-mini" aria-label={`Edit ${meal.food_name}`} onClick={() => setEditing(e => !e)}><Pencil size={14} /></button>
@@ -142,6 +198,38 @@ function EntryRow({ meal, onChanged }: { meal: MealRow; onChanged: () => void })
             : <button type="button" className="icon-mini" aria-label={`Delete ${meal.food_name}`} onClick={() => setConfirmDel(true)}><Trash2 size={14} /></button>}
         </div>
       )}
+
+      {showNutrients && (
+        <div className="entry-nutrients">
+          <div className="entry-nutrients-head">
+            <div className="entry-nutrients-title">
+              <Sparkles size={13} style={{ color: "#d48c28" }} />
+              <span>Vitamins &amp; Minerals for {amountLabel(meal)}</span>
+            </div>
+            <div className="entry-nutrients-meta">
+              {nutrientsList.length > 0
+                ? `${nutrientsList.filter(n => n.category === "vitamin").length} vitamins · ${nutrientsList.filter(n => n.category === "mineral").length} minerals`
+                : "No non-zero micronutrients"}
+            </div>
+          </div>
+          {loadingNutrients ? (
+            <p className="nutrient-empty-text">Loading nutrient breakdown…</p>
+          ) : nutrientsList.length > 0 ? (
+            <div className="nutrient-grid">
+              {nutrientsList.map(n => (
+                <div className={`nutrient-card ${n.category}`} key={n.key}>
+                  <div className="nutrient-card-name" title={n.name}>{n.name}</div>
+                  <div className="nutrient-card-val tabular">{n.amount} <small>{n.unit}</small></div>
+                  <div className="nutrient-card-cat">{n.category}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="nutrient-empty-text">No non-zero vitamins or minerals recorded for this item.</p>
+          )}
+        </div>
+      )}
+
       {editing && (
         <div className="entry-edit">
           <div className="fo-seg">

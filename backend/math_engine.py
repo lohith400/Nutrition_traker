@@ -179,6 +179,15 @@ def _extract_micros(row, scale: float, prefix: str = "unit_serving_") -> dict:
                 return float(row[col_name])
             except (ValueError, TypeError):
                 return None
+        # Fallback: if serving column was None, calculate from 100g column if serving_grams exists
+        if prefix == "unit_serving_" and "serving_grams" in keys and row["serving_grams"] is not None:
+            try:
+                base_name = col_name[len("unit_serving_"):]
+                col_100g = f"{base_name}_100g"
+                if col_100g in keys and row[col_100g] is not None:
+                    return float(row[col_100g]) * (float(row["serving_grams"]) / 100.0)
+            except (ValueError, TypeError):
+                pass
         return None
 
     def calc(col_name):
@@ -225,6 +234,82 @@ def _extract_micros(row, scale: float, prefix: str = "unit_serving_") -> dict:
     return micros
 
 
+NUTRIENT_METADATA = {
+    "fibre_g": {"name": "Dietary Fibre", "category": "macro", "unit": "g"},
+    "calcium_mg": {"name": "Calcium", "category": "mineral", "unit": "mg"},
+    "magnesium_mg": {"name": "Magnesium", "category": "mineral", "unit": "mg"},
+    "sodium_mg": {"name": "Sodium", "category": "mineral", "unit": "mg"},
+    "potassium_mg": {"name": "Potassium", "category": "mineral", "unit": "mg"},
+    "iron_mg": {"name": "Iron", "category": "mineral", "unit": "mg"},
+    "copper_mg": {"name": "Copper", "category": "mineral", "unit": "mg"},
+    "zinc_mg": {"name": "Zinc", "category": "mineral", "unit": "mg"},
+    "vita_ug": {"name": "Vitamin A", "category": "vitamin", "unit": "µg"},
+    "vite_mg": {"name": "Vitamin E", "category": "vitamin", "unit": "mg"},
+    "vitd_ug": {"name": "Vitamin D", "category": "vitamin", "unit": "µg"},
+    "vitk_ug": {"name": "Vitamin K", "category": "vitamin", "unit": "µg"},
+    "folate_ug": {"name": "Folate (B9)", "category": "vitamin", "unit": "µg"},
+    "vitb1_mg": {"name": "Thiamine (B1)", "category": "vitamin", "unit": "mg"},
+    "vitb2_mg": {"name": "Riboflavin (B2)", "category": "vitamin", "unit": "mg"},
+    "vitb3_mg": {"name": "Niacin (B3)", "category": "vitamin", "unit": "mg"},
+    "vitb5_mg": {"name": "Pantothenic Acid (B5)", "category": "vitamin", "unit": "mg"},
+    "vitb6_mg": {"name": "Vitamin B6", "category": "vitamin", "unit": "mg"},
+    "vitb7_ug": {"name": "Biotin (B7)", "category": "vitamin", "unit": "µg"},
+    "vitc_mg": {"name": "Vitamin C", "category": "vitamin", "unit": "mg"},
+}
+
+
+def extract_non_zero_nutrients(macros: dict) -> list:
+    """
+    Extracts all non-zero vitamins, minerals, and dietary fibre.
+    Enforces the zero-exclusion rule: any nutrient with amount <= 0 or None
+    is strictly omitted.
+    """
+    if not isinstance(macros, dict):
+        return []
+
+    nutrients = []
+
+    # 1. Dietary fibre
+    fib = macros.get("fibre_g")
+    if fib is not None:
+        try:
+            fib_val = float(fib)
+            if fib_val > 0:
+                nutrients.append({
+                    "key": "fibre_g",
+                    "name": "Dietary Fibre",
+                    "category": "macro",
+                    "unit": "g",
+                    "amount": round(fib_val, 1),
+                })
+        except (ValueError, TypeError):
+            pass
+
+    # 2. Micronutrients (vitamins & minerals)
+    micros = macros.get("micros")
+    if micros and isinstance(micros, dict):
+        for key, meta in NUTRIENT_METADATA.items():
+            if key == "fibre_g":
+                continue
+            val = micros.get(key)
+            if val is not None:
+                try:
+                    num = float(val)
+                    if num > 0:
+                        amt = round(num, 2) if num < 1 else round(num, 1)
+                        if amt > 0:
+                            nutrients.append({
+                                "key": key,
+                                "name": meta["name"],
+                                "category": meta["category"],
+                                "unit": meta["unit"],
+                                "amount": amt,
+                            })
+                except (ValueError, TypeError):
+                    pass
+    return nutrients
+
+
 def calculate_meal_macros(food_code: str, quantity: float, unit: str = "serving") -> dict:
     """
     Given a resolved food_code and a quantity, returns exact macros.
@@ -259,6 +344,7 @@ def calculate_meal_macros(food_code: str, quantity: float, unit: str = "serving"
         if isinstance(res, dict) and "error" not in res:
             res["fibre_g"] = None
             res["micros"] = None
+            res["nutrients"] = []
         return res
 
     conn = _get_conn()
@@ -322,6 +408,7 @@ def calculate_meal_macros(food_code: str, quantity: float, unit: str = "serving"
             "micros": micros_val,
         }
 
+    result["nutrients"] = extract_non_zero_nutrients(result)
     result["quality"] = quality
     if row["quality_note"]:
         result["data_quality_warning"] = (

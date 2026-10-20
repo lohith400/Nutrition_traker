@@ -228,9 +228,50 @@ def log_water(payload: WaterLogRequest):
     return {"status": "logged", **get_overview()}
 
 
+def enrich_meals_with_nutrients(meals: list) -> None:
+    """Calculates and attaches non-zero vitamins, minerals, and nutrients to each logged meal."""
+    if not meals:
+        return
+    cache = {}
+    for meal in meals:
+        code = meal.get("food_code")
+        qty = meal.get("quantity") or 1.0
+        unit = meal.get("unit") or "serving"
+        if not code:
+            meal["nutrients"] = []
+            continue
+        cache_key = (code, float(qty), str(unit))
+        if cache_key in cache:
+            meal["nutrients"] = cache[cache_key]
+            continue
+        try:
+            macros = math_engine.calculate_meal_macros(code, float(qty), str(unit))
+            if "error" in macros and unit == "serving":
+                conn_tmp = memory_agent._get_conn()
+                try:
+                    f_row = conn_tmp.execute("SELECT serving_grams FROM food_items WHERE food_code = ?", (code,)).fetchone()
+                    if f_row and f_row["serving_grams"]:
+                        macros = math_engine.calculate_meal_macros(code, float(qty) * float(f_row["serving_grams"]), "grams")
+                finally:
+                    conn_tmp.close()
+            if "error" not in macros:
+                nutrients = macros.get("nutrients") or math_engine.extract_non_zero_nutrients(macros)
+                meal["nutrients"] = nutrients
+                if macros.get("fibre_g") is not None:
+                    meal["fibre_g"] = macros["fibre_g"]
+                cache[cache_key] = nutrients
+            else:
+                meal["nutrients"] = []
+                cache[cache_key] = []
+        except Exception:
+            meal["nutrients"] = []
+
+
 @app.get("/api/recent-meals")
 def get_recent_meals():
-    return memory_agent.get_todays_logs()
+    data = memory_agent.get_todays_logs()
+    enrich_meals_with_nutrients(data.get("meals", []))
+    return data
 
 
 @app.get("/api/history")
@@ -238,7 +279,33 @@ def get_history(days: int = 14):
     """Full daily intake log: every meal, grouped by day, for the last
     `days` days (default 14) -- the browsable record of everything ever
     logged, not just today."""
-    return {"days": memory_agent.get_logs_history(days)}
+    days_data = memory_agent.get_logs_history(days)
+    for d in days_data:
+        enrich_meals_with_nutrients(d.get("meals", []))
+    return {"days": days_data}
+
+
+@app.get("/api/food-nutrients")
+def food_nutrients(code: str, quantity: float = 1.0, unit: str = "serving"):
+    """Returns non-zero vitamins and minerals for a specific food item and quantity."""
+    macros = math_engine.calculate_meal_macros(code, quantity, unit)
+    if "error" in macros and unit == "serving":
+        conn_tmp = memory_agent._get_conn()
+        try:
+            f_row = conn_tmp.execute("SELECT serving_grams FROM food_items WHERE food_code = ?", (code,)).fetchone()
+            if f_row and f_row["serving_grams"]:
+                macros = math_engine.calculate_meal_macros(code, quantity * float(f_row["serving_grams"]), "grams")
+        finally:
+            conn_tmp.close()
+    if "error" in macros:
+        return {"code": code, "nutrients": [], "error": macros.get("error")}
+    return {
+        "code": code,
+        "food_name": macros.get("food_name"),
+        "quantity": quantity,
+        "unit": unit,
+        "nutrients": macros.get("nutrients") or math_engine.extract_non_zero_nutrients(macros),
+    }
 
 
 class ReminderIn(BaseModel):
@@ -542,6 +609,7 @@ def _chat_finish(reply: str, tool_events: list, saved_user) -> dict:
         get_overview,
         memory_agent.get_todays_logs,
     )
+    enrich_meals_with_nutrients(meals.get("meals", []))
     return {"reply": reply, "tool_events": tool_events, "overview": overview, "recent_meals": meals}
 
 
@@ -664,7 +732,10 @@ def edit_log(log_id: int, payload: LogPatch):
             raise HTTPException(status_code=422, detail=macros["error"])
     memory_agent.update_log(log_id, meal_type, quantity, unit, macros.get("serving_label"), macros["calories"], macros["protein_g"], macros["carbs_g"], macros["fat_g"])
     memory_agent.maybe_detect_patterns(force=True)
-    return {"status": "updated", "log": memory_agent.get_log(log_id)}
+    updated = memory_agent.get_log(log_id)
+    if updated:
+        enrich_meals_with_nutrients([updated])
+    return {"status": "updated", "log": updated}
 
 
 @app.delete("/api/log/{log_id}")
@@ -815,7 +886,16 @@ def _compute_day_micronutrients(day: str):
             continue
         macros = math_engine.calculate_meal_macros(code, qty, unit)
         if "error" in macros:
-            continue
+            if unit == "serving":
+                conn_tmp = memory_agent._get_conn()
+                try:
+                    f_row = conn_tmp.execute("SELECT serving_grams FROM food_items WHERE food_code = ?", (code,)).fetchone()
+                    if f_row and f_row["serving_grams"]:
+                        macros = math_engine.calculate_meal_macros(code, qty * float(f_row["serving_grams"]), "grams")
+                finally:
+                    conn_tmp.close()
+            if "error" in macros:
+                continue
 
         had_data = False
         # Fibre
