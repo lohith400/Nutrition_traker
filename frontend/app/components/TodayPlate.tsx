@@ -1,14 +1,10 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import dynamic from "next/dynamic";
-import { Flame, Plus, Sparkles, TrendingUp } from "lucide-react";
-import { FoodGlyph } from "./art/FoodGlyph";
+import React from "react";
+import { Plus } from "lucide-react";
 import { useClientNow } from "../hooks/useClientNow";
-import { useTierCapabilities } from "../hooks/useQualityTier";
-
-// Lazy-load 3D thali to protect first-load JS budget
-const TodayPlate3D = dynamic(() => import("./TodayPlate3D"), { ssr: false });
+import { DailyBloom } from "./DailyBloom";
+import type { MicronutrientItem } from "./VitaminShelf";
 
 interface TodayPlateProps {
   consumed: number;
@@ -22,6 +18,7 @@ interface TodayPlateProps {
   fatTarget: number;
   fibre?: number;
   fibreTarget?: number;
+  micros?: MicronutrientItem[] | null;
   meals?: Array<{ food_name: string; meal_type: string; calories: number; protein_g: number }>;
   greeting: string;
   userName: string;
@@ -40,41 +37,13 @@ export function TodayPlate({
   fatTarget,
   fibre = 0,
   fibreTarget = 30,
+  micros = null,
   meals = [],
   greeting,
   userName,
   onLogClick,
 }: TodayPlateProps) {
   const now = useClientNow();
-  const caps = useTierCapabilities();
-  // Count-up display for calories
-  const [displayedCal, setDisplayedCal] = useState(0);
-
-  useEffect(() => {
-    const end = Math.round(consumed);
-    if (end === 0) {
-      setDisplayedCal(0);
-      return;
-    }
-    const duration = 750; // ms
-    const startTime = performance.now();
-    let animId: number;
-
-    const tick = (now: number) => {
-      const elapsed = now - startTime;
-      const progress = Math.min(1, elapsed / duration);
-      // easeOutExpo
-      const eased = progress === 1 ? 1 : 1 - Math.pow(2, -10 * progress);
-      setDisplayedCal(Math.round(eased * end));
-      if (progress < 1) {
-        animId = requestAnimationFrame(tick);
-      }
-    };
-
-    animId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animId);
-  }, [consumed]);
-
   const remaining = Math.round(target - consumed);
   const over = target > 0 && consumed > target;
 
@@ -83,18 +52,6 @@ export function TodayPlate({
   const carbPct = carbsTarget > 0 ? Math.min(1, carbs / carbsTarget) : 0;
   const fatPct = fatTarget > 0 ? Math.min(1, fat / fatTarget) : 0;
   const fibrePct = fibreTarget > 0 ? Math.min(1, fibre / fibreTarget) : 0;
-
-  // Geometry for SVG segmented rim
-  // Circle perimeter = 2 * PI * r
-  const r = 98;
-  const circumference = 2 * Math.PI * r; // ~615.75
-  // Each of the 4 segments takes 1/4th of circumference (~153.9) minus gap
-  const quadLen = circumference / 4;
-  const gap = 6;
-  const arcLen = quadLen - gap;
-
-  // Unique meals to place as stamps on the plate
-  const plateMeals = meals.slice(0, 5);
 
   return (
     <div className="today-plate-hero">
@@ -117,163 +74,23 @@ export function TodayPlate({
         </p>
       </div>
 
-      {/* The Crafted Plate Ceramic Experience */}
+      {/* Left: the Daily Bloom (all of today's intake in one view). Right: exact macro rails. */}
       <div className="plate-stage">
-        <div className="plate-ceramic-wrap">
-          {caps.render3D ? (
-            <div style={{ position: "absolute", inset: 0, zIndex: 1 }}>
-              <TodayPlate3D
-                protPct={protPct}
-                carbPct={carbPct}
-                fatPct={fatPct}
-                fibrePct={fibrePct}
-                active={true}
-              />
-            </div>
-          ) : (
-            <svg
-              className="plate-ceramic-svg"
-              viewBox="0 0 240 240"
-              role="img"
-              aria-label={`Today's Plate: ${Math.round(consumed)} of ${Math.round(target)} calories eaten`}
-            >
-              {/* Outer Ceramic Plate Base */}
-              <circle cx="120" cy="120" r="114" fill="#faf8f2" stroke="#e0d9ca" strokeWidth="2" />
-              <circle cx="120" cy="120" r="108" fill="#ffffff" stroke="#ede7dc" strokeWidth="1" />
-              <circle cx="120" cy="120" r="82" fill="#fcfaf5" stroke="#eadecb" strokeWidth="1" strokeDasharray="2 3" />
-
-              {/* Segment Track 1: Protein (Top-Right, 0° to 90° -> 270° offset in SVG) */}
-              <circle
-                cx="120"
-                cy="120"
-                r={r}
-                fill="none"
-                stroke="#ebf1ec"
-                strokeWidth="9"
-                strokeDasharray={`${arcLen} ${circumference - arcLen}`}
-                transform="rotate(-90 120 120)"
-              />
-              <circle
-                cx="120"
-                cy="120"
-                r={r}
-                fill="none"
-                stroke="var(--sage-leaf)"
-                strokeWidth="9"
-                strokeLinecap="round"
-                strokeDasharray={`${protPct * arcLen} ${circumference - (protPct * arcLen)}`}
-                transform="rotate(-90 120 120)"
-                className="plate-arc"
-              />
-
-              {/* Segment Track 2: Carbs (Bottom-Right, 90° to 180° -> 0° offset) */}
-              <circle
-                cx="120"
-                cy="120"
-                r={r}
-                fill="none"
-                stroke="#fcf2dc"
-                strokeWidth="9"
-                strokeDasharray={`${arcLen} ${circumference - arcLen}`}
-                transform="rotate(0 120 120)"
-              />
-              <circle
-                cx="120"
-                cy="120"
-                r={r}
-                fill="none"
-                stroke="var(--mustard)"
-                strokeWidth="9"
-                strokeLinecap="round"
-                strokeDasharray={`${carbPct * arcLen} ${circumference - (carbPct * arcLen)}`}
-                transform="rotate(0 120 120)"
-                className="plate-arc"
-              />
-
-              {/* Segment Track 3: Fat (Bottom-Left, 180° to 270° -> 90° offset) */}
-              <circle
-                cx="120"
-                cy="120"
-                r={r}
-                fill="none"
-                stroke="#faeae4"
-                strokeWidth="9"
-                strokeDasharray={`${arcLen} ${circumference - arcLen}`}
-                transform="rotate(90 120 120)"
-              />
-              <circle
-                cx="120"
-                cy="120"
-                r={r}
-                fill="none"
-                stroke="var(--terracotta)"
-                strokeWidth="9"
-                strokeLinecap="round"
-                strokeDasharray={`${fatPct * arcLen} ${circumference - (fatPct * arcLen)}`}
-                transform="rotate(90 120 120)"
-                className="plate-arc"
-              />
-
-              {/* Segment Track 4: Fibre (Top-Left, 270° to 360° -> 180° offset) */}
-              <circle
-                cx="120"
-                cy="120"
-                r={r}
-                fill="none"
-                stroke="#f0f3e6"
-                strokeWidth="9"
-                strokeDasharray={`${arcLen} ${circumference - arcLen}`}
-                transform="rotate(180 120 120)"
-              />
-              <circle
-                cx="120"
-                cy="120"
-                r={r}
-                fill="none"
-                stroke="var(--olive)"
-                strokeWidth="9"
-                strokeLinecap="round"
-                strokeDasharray={`${fibrePct * arcLen} ${circumference - (fibrePct * arcLen)}`}
-                transform="rotate(180 120 120)"
-                className="plate-arc"
-              />
-            </svg>
-          )}
-
-          {/* Plate Center: Energetic Numerical Hub */}
-          <div className="plate-center-hub">
-            <span className="plate-center-label almanac-eyebrow">
-              {target > 0 ? (over ? "OVER TARGET" : "REMAINING") : "TOTAL EATEN"}
-            </span>
-            <div className="plate-center-cal almanac-serif tabular">
-              {target > 0 ? Math.abs(remaining) : displayedCal}
-            </div>
-            <span className="plate-center-unit almanac-mono">kcal</span>
-
-            {burned > 0 && (
-              <div className="plate-burned-pill" title={`${Math.round(burned)} kcal burned recorded in Google Fit`}>
-                <Flame size={12} />
-                <span className="tabular">{Math.round(burned)}</span> burned
-              </div>
-            )}
-          </div>
-
-          {/* Food Glyphs Settling on the Plate */}
-          {plateMeals.length > 0 && (
-            <div className="plate-food-stamps">
-              {plateMeals.map((m, idx) => (
-                <div
-                  key={`${m.food_name}-${idx}`}
-                  className="plate-stamp-chip"
-                  style={{ animationDelay: `${idx * 0.12}s` }}
-                  title={`${m.food_name} (${m.calories} kcal, ${m.protein_g}g P)`}
-                >
-                  <FoodGlyph name={m.food_name} mealType={m.meal_type} size={22} />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <DailyBloom
+          consumed={consumed}
+          target={target}
+          burned={burned}
+          protein={protein}
+          proteinTarget={proteinTarget}
+          carbs={carbs}
+          carbsTarget={carbsTarget}
+          fat={fat}
+          fatTarget={fatTarget}
+          fibre={fibre}
+          fibreTarget={fibreTarget}
+          micros={micros}
+          meals={meals}
+        />
 
         {/* Quadrant Legend & Macro Progress Rails */}
         <div className="plate-quadrant-legend">
